@@ -53,3 +53,13 @@ HNS_TEST_PROVIDER_ROOT=/path/to/app/providers cargo test -p home-network-securit
 Keep live account metadata, inventories, captures, and private test artifacts out of public reports. A passing synthetic containment probe is not a complete security audit or proof of Windows runtime behavior.
 
 The updated macOS UI also completed an explicit service scan of the local computer and displayed the observed service/product/version in its device details and review summary. OS identity enrichment is tested to apply only to this computer's own interface addresses; neighboring devices retain unknown values.
+
+## MAC identity and reliability update
+
+On September 5, 2026, synthetic regression tests covered MAC-linked DHCP names/history, legacy labels, conflicting/shared MACs (including ambiguity appearing after a rename), per-hour upload acknowledgements, rediscovery evidence/first-seen preservation, IP reuse by a different MAC, time-filtered totals beyond 10,000 records, configurable retention, and local explanation/export/delete behavior. UI tests cover busy-provider model recovery, remembered preferences, safe response rendering, installer error routing/resumption, and cancelled deletion.
+
+The macOS native app reopened with its existing 1,078 observations preserved. Both ChatGPT (GPT-5.4-Mini) and Grok (Grok 4.6) completed reviewed synthetic prompts through their subscriptions; navigation during the request was followed by completed responses and available model controls. A synthetic ChatGPT response was explicitly saved and its exact summary/answer inspected in local history. No real network summary was sent. The authenticated loopback API and real TShark four-frame offline import smoke tests passed.
+
+Packet-drop parsing is tested against explicit TShark and dumpcap counter formats. TShark does not necessarily print a zero-drop report, so silence remains unknown. Interrupted captures discard incomplete counters. See the upstream [TShark capture callbacks](https://github.com/wireshark/wireshark/blob/master/tshark.c) and [dumpcap reporting](https://github.com/wireshark/wireshark/blob/master/dumpcap.c). No induced-loss or whole-network coverage claim is made.
+
+A release verification script correctly refused the unsigned/ad-hoc development Mac app. No Developer ID Application identity was available; signing/notarization and physical Windows/fresh-machine installation acceptance remain open in [installation acceptance](installation-acceptance.md). Automated tests and development bundles do not close those gates.

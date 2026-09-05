@@ -17,6 +17,7 @@ pub struct Job {
     pub count: usize,
     pub sensor_id: Option<String>,
     pub error: Option<String>,
+    pub remedy: Option<String>,
 }
 pub struct Collection {
     db: PathBuf,
@@ -36,6 +37,7 @@ pub struct Host {
     addresses: Vec<String>,
     suggested_cidrs: Vec<String>,
     capture_error: Option<String>,
+    capture_remedy: Option<String>,
     discovery_available: bool,
     platform: String,
 }
@@ -61,8 +63,14 @@ pub fn inspect() -> Result<Host, String> {
                 .collect(),
             None,
         ),
-        Err(e) => (Vec::new(), Some(format!("TShark unavailable: {e}"))),
+        Err(e) => (
+            Vec::new(),
+            Some(format!("TShark interface check failed: {e:#}")),
+        ),
     };
+    let capture_remedy = capture_error
+        .as_ref()
+        .map(|e| capture_remedy(e).to_string());
     let mut addresses = Vec::new();
     let mut suggested_cidrs = Vec::new();
     for interface in if_addrs::get_if_addrs().map_err(|e| e.to_string())? {
@@ -87,6 +95,7 @@ pub fn inspect() -> Result<Host, String> {
         addresses,
         suggested_cidrs,
         capture_error,
+        capture_remedy,
         discovery_available: bounded_output(
             tool_command("nmap").arg("--version"),
             65536,
@@ -193,7 +202,13 @@ impl Collection {
                 job.running = false;
                 match result {
                     Ok(count) => job.count = count,
-                    Err(e) => job.error = Some(format!("{e:#}")),
+                    Err(e) => {
+                        let message = format!("{e:#}");
+                        if kind == "capture" {
+                            job.remedy = Some(capture_remedy(&message).into());
+                        }
+                        job.error = Some(message);
+                    }
                 }
             }
         });
@@ -203,5 +218,43 @@ impl Collection {
 impl Drop for Collection {
     fn drop(&mut self) {
         self.shutdown();
+    }
+}
+
+fn capture_remedy(message: &str) -> &'static str {
+    let m = message.to_lowercase();
+    if m.contains("no such file or directory")
+        || m.contains("os error 2")
+        || m.contains("cannot find the file")
+    {
+        "install"
+    } else if m.contains("permission denied")
+        || m.contains("don't have permission")
+        || m.contains("access is denied")
+        || m.contains("not permitted")
+    {
+        "permission"
+    } else if m.contains("npcap") || m.contains("wpcap") || m.contains("packet.dll") {
+        "driver"
+    } else {
+        "refresh"
+    }
+}
+#[cfg(test)]
+mod diagnostic_tests {
+    use super::*;
+    #[test]
+    fn routes_capture_failures_to_the_actual_remedy() {
+        assert_eq!(
+            capture_remedy("No such file or directory (os error 2)"),
+            "install"
+        );
+        assert_eq!(
+            capture_remedy("You don't have permission to capture"),
+            "permission"
+        );
+        assert_eq!(capture_remedy("Npcap driver is not installed"), "driver");
+        assert_eq!(capture_remedy("Capture timed out"), "refresh");
+        assert_eq!(capture_remedy("No interfaces found"), "refresh");
     }
 }

@@ -289,6 +289,7 @@ pub fn parse_nmap(xml: &str) -> Result<Vec<DiscoveredDevice>> {
                             .parse::<u16>()
                             .ok()
                             .map(|port| ObservedService {
+                                observed_at: None,
                                 port,
                                 transport: get("protocol").into(),
                                 name: None,

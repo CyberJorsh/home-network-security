@@ -108,6 +108,8 @@ impl Sensor {
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct DeviceDetails {
+    #[serde(default)]
+    pub field_observed_at: std::collections::BTreeMap<String, i64>,
     pub observed_at: Option<i64>,
     pub source: Option<String>,
     pub hostname: Option<String>,
@@ -120,6 +122,8 @@ pub struct DeviceDetails {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ObservedService {
+    #[serde(default)]
+    pub observed_at: Option<i64>,
     pub port: u16,
     pub transport: String,
     pub name: Option<String>,
@@ -198,6 +202,8 @@ pub struct Totals {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Snapshot {
+    #[serde(default = "default_bucket_seconds")]
+    pub bucket_seconds: i64,
     pub mode: String,
     pub sensors: Vec<Sensor>,
     pub selected_sensor: Option<String>,
@@ -246,4 +252,51 @@ pub fn device_id(sensor: &str, ip: &str, mac: &Option<String>) -> String {
         .map(|m| m.to_lowercase())
         .unwrap_or_else(|| ip.into());
     format!("{sensor}:{identity}:{ip}")
+}
+
+/// Ethernet multicast, broadcast, and zero addresses do not identify an endpoint.
+pub fn usable_mac(mac: &Option<String>) -> Option<String> {
+    let value = mac.as_ref()?.to_lowercase();
+    if value.len() != 17
+        || value == "00:00:00:00:00:00"
+        || u8::from_str_radix(value.split(':').next()?, 16).ok()? & 1 != 0
+    {
+        return None;
+    }
+    Some(value)
+}
+
+pub fn merge_details(mut old: DeviceDetails, new: DeviceDetails) -> DeviceDetails {
+    // Preserve evidence time when a basic scan supplies no new identity or service evidence.
+    if new.hostname.is_some()
+        || new.vendor.is_some()
+        || new.model.is_some()
+        || new.operating_system.is_some()
+        || !new.services.is_empty()
+    {
+        old.observed_at = new.observed_at;
+        old.source = new.source.or(old.source);
+    }
+    old.field_observed_at.extend(new.field_observed_at);
+    old.hostname = new.hostname.or(old.hostname);
+    old.vendor = new.vendor.or(old.vendor);
+    old.model = new.model.or(old.model);
+    old.operating_system = new.operating_system.or(old.operating_system);
+    for service in new.services {
+        if let Some(existing) = old
+            .services
+            .iter_mut()
+            .find(|s| s.port == service.port && s.transport == service.transport)
+        {
+            *existing = service;
+        } else {
+            old.services.push(service);
+        }
+    }
+    old.services.sort_by_key(|s| (s.transport.clone(), s.port));
+    old
+}
+
+fn default_bucket_seconds() -> i64 {
+    300
 }

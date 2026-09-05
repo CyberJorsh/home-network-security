@@ -82,7 +82,7 @@ Read the [collector guide](docs/collector.md) before choosing a sensor location.
 ## Privacy and limits
 
 - Local SQLite database; raw packet payloads are not saved by this app. Imported capture files remain where you placed them.
-- Latest 100,000 normalized observations retained globally; views use at most the latest 10,000 for one sensor. Totals, first-seen labels, and alert thresholds describe that retained view, not lifetime history.
+- Up to 100,000 normalized observations retained globally, with a configurable record limit. Hour/day/week/all views summarize all retained records in that range for one sensor. MAC-linked names and first-seen history persist separately; upload alerts use UTC hourly windows. Totals are retained evidence, not lifetime traffic.
 - No cross-sensor totals that could double-count mirrored packets. No long-term aggregation or configurable time range yet.
 - Device identities are observed IP/MAC combinations within a sensor domain. DHCP changes, randomized MACs, IPv6 privacy addresses, or missing link-layer metadata may create separate entries. Names do not authenticate devices.
 - Prefix configuration determines internet versus local traffic. Add your globally routed home IPv6 prefix when applicable.
@@ -110,3 +110,5 @@ Start with [CONTRIBUTING.md](CONTRIBUTING.md), [architecture](docs/architecture.
 ## License
 
 Project code is licensed under [Apache-2.0](LICENSE). External dependencies retain their own licenses. Wireshark, Nmap, Npcap, and provider clients are separately installed; see [third-party notes](THIRD_PARTY.md). No third-party product affiliation or endorsement is implied.
+
+See [installation and signing acceptance](docs/installation-acceptance.md) for release verification and physical-device gates.

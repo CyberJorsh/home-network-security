@@ -2,11 +2,17 @@ import { useState } from 'react';
 import type { Bucket } from '../types';
 import { bytes, time } from '../lib';
 
-export default function Chart({ timeline }: { timeline: Bucket[] }) {
+export default function Chart({
+  timeline,
+  bucketSeconds = 300,
+}: {
+  timeline: Bucket[];
+  bucketSeconds?: number;
+}) {
   const [hover, setHover] = useState<number | null>(null);
-  const max = Math.max(
+  const max = timeline.reduce(
+    (value, b) => Math.max(value, b.upload, b.download, b.localBytes),
     1,
-    ...timeline.flatMap((b) => [b.upload, b.download, b.localBytes]),
   );
   const width = 880,
     height = 190,
@@ -34,7 +40,7 @@ export default function Chart({ timeline }: { timeline: Bucket[] }) {
         className="traffic-chart"
         viewBox={`0 0 ${width} ${height}`}
         role="img"
-        aria-label="Traffic volume per five-minute bucket. Download is green, upload is blue, local transfers are amber."
+        aria-label={`Traffic volume per ${Math.round(bucketSeconds / 60)} minute bucket. Download is green, upload is blue, local transfers are amber.`}
       >
         <defs>
           <linearGradient id="fill" x1="0" y1="0" x2="0" y2="1">

@@ -194,10 +194,17 @@ fn serve(store: Store, port: u16, token_file: &PathBuf, demo: bool) -> Result<()
                     req.url().split('?').next().unwrap_or(""),
                 ) {
                     ("GET", "/v1/snapshot") => {
-                        let sensor = req.url().split_once("?sensor=").map(|(_, s)| s);
-                        Ok(serde_json::to_value(store.snapshot(
+                        let params: std::collections::HashMap<_, _> = req
+                            .url()
+                            .split_once('?')
+                            .map(|(_, q)| q.split('&').filter_map(|p| p.split_once('=')).collect())
+                            .unwrap_or_default();
+                        let sensor = params.get("sensor").copied();
+                        let since = params.get("since").map(|v| v.parse::<i64>()).transpose()?;
+                        Ok(serde_json::to_value(store.snapshot_since(
                             sensor,
                             if demo { "demo" } else { "collector" },
+                            since,
                         )?)?)
                     }
                     ("POST", "/v1/rename") | ("POST", "/v1/acknowledge") => {

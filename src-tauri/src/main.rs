@@ -66,29 +66,40 @@ fn remote_request(
     Ok(value)
 }
 
-fn snapshot_impl(state: &AppState, mode: String, sensor: Option<String>) -> CmdResult<Snapshot> {
+fn snapshot_impl(
+    state: &AppState,
+    mode: String,
+    sensor: Option<String>,
+    since: Option<i64>,
+) -> CmdResult<Snapshot> {
     if mode == "demo" {
         return state
             .demo
             .lock()
             .map_err(error)?
-            .snapshot(sensor.as_deref(), "demo")
+            .snapshot_since(sensor.as_deref(), "demo", since)
             .map_err(error);
     }
     if let Some(remote) = state.remote.lock().map_err(error)?.clone() {
-        let path = if let Some(sensor) = sensor {
+        let mut path = if let Some(sensor) = sensor {
             identifier(&sensor).map_err(error)?;
             format!("/v1/snapshot?sensor={sensor}")
         } else {
             "/v1/snapshot".into()
         };
+        if let Some(since) = since {
+            path.push_str(&format!(
+                "{}since={since}",
+                if path.contains('?') { "&" } else { "?" }
+            ));
+        }
         return serde_json::from_value(remote_request(&remote, &path, None)?).map_err(error);
     }
     state
         .local
         .lock()
         .map_err(error)?
-        .snapshot(sensor.as_deref(), "local")
+        .snapshot_since(sensor.as_deref(), "local", since)
         .map_err(error)
 }
 fn rename_device_impl(state: &AppState, mode: String, id: String, name: String) -> CmdResult<()> {
@@ -250,9 +261,10 @@ async fn snapshot(
     state: State<'_, Arc<AppState>>,
     mode: String,
     sensor: Option<String>,
+    since: Option<i64>,
 ) -> CmdResult<Snapshot> {
     let state = state.inner().clone();
-    tauri::async_runtime::spawn_blocking(move || snapshot_impl(&state, mode, sensor))
+    tauri::async_runtime::spawn_blocking(move || snapshot_impl(&state, mode, sensor, since))
         .await
         .map_err(error)?
 }
@@ -410,6 +422,99 @@ fn stop_explanation(state: State<'_, Arc<AppState>>) {
     state.explanations.stop();
 }
 
+#[tauri::command]
+fn storage_limit(state: State<'_, Arc<AppState>>) -> CmdResult<usize> {
+    state
+        .local
+        .lock()
+        .map_err(error)?
+        .storage_limit()
+        .map_err(error)
+}
+#[tauri::command]
+fn set_storage_limit(state: State<'_, Arc<AppState>>, limit: usize) -> CmdResult<()> {
+    state
+        .local
+        .lock()
+        .map_err(error)?
+        .set_storage_limit(limit)
+        .map_err(error)
+}
+#[tauri::command]
+async fn export_local_data(state: State<'_, Arc<AppState>>) -> CmdResult<bool> {
+    let state = state.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        let Some(path) = rfd::FileDialog::new()
+            .set_file_name("network-observations.json")
+            .save_file()
+        else {
+            return Ok(false);
+        };
+        let value = state
+            .local
+            .lock()
+            .map_err(error)?
+            .export_local()
+            .map_err(error)?;
+        let mut options = std::fs::OpenOptions::new();
+        options.write(true).create(true).truncate(true);
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::OpenOptionsExt;
+            options.mode(0o600);
+        }
+        let file = options.open(path).map_err(error)?;
+        serde_json::to_writer_pretty(file, &value).map_err(error)?;
+        Ok(true)
+    })
+    .await
+    .map_err(error)?
+}
+#[tauri::command]
+async fn clear_local_data(state: State<'_, Arc<AppState>>) -> CmdResult<bool> {
+    let state = state.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        if state.collection.job.lock().map_err(error)?.running {return Err("Stop collection before deleting local data".into());}
+        let confirmed=rfd::MessageDialog::new().set_title("Delete local observations?").set_description("Delete this computer's observations, device names, alerts, and saved explanations? Export first if you need a copy. Provider sign-ins and remote collectors are kept.").set_buttons(rfd::MessageButtons::YesNo).show();
+        if confirmed != rfd::MessageDialogResult::Yes {return Ok(false);}
+        let job=state.collection.job.lock().map_err(error)?;
+        if job.running {return Err("Stop collection before deleting local data".into());}
+        state.local.lock().map_err(error)?.clear_local_data().map_err(error)?;
+        Ok(true)
+    }).await.map_err(error)?
+}
+#[tauri::command]
+fn explanation_history(state: State<'_, Arc<AppState>>) -> CmdResult<Vec<serde_json::Value>> {
+    state
+        .local
+        .lock()
+        .map_err(error)?
+        .explanation_history()
+        .map_err(error)
+}
+#[tauri::command]
+fn save_explanation(state: State<'_, Arc<AppState>>) -> CmdResult<()> {
+    let output = state.explanations.output.lock().map_err(error)?;
+    if output.running || !output.completed {
+        return Err("Wait for a completed explanation before saving".into());
+    }
+    state
+        .local
+        .lock()
+        .map_err(error)?
+        .save_explanation(&serde_json::to_value(&*output).map_err(error)?)
+        .map_err(error)
+}
+#[tauri::command]
+fn delete_explanation(state: State<'_, Arc<AppState>>, id: String) -> CmdResult<()> {
+    state
+        .local
+        .lock()
+        .map_err(error)?
+        .delete_explanation(&id)
+        .map_err(error)
+}
+
 fn main() {
     tauri::Builder::default()
         .setup(|app| {
@@ -436,6 +541,13 @@ fn main() {
             }
         })
         .invoke_handler(tauri::generate_handler![
+            storage_limit,
+            set_storage_limit,
+            export_local_data,
+            clear_local_data,
+            explanation_history,
+            save_explanation,
+            delete_explanation,
             install_collection_tool,
             provider_models,
             send_explanation,

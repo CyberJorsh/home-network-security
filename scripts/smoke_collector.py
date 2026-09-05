@@ -51,6 +51,8 @@ def main():
             assert data['mode'] == 'demo' and len(data['devices']) == 6
             assert request('GET', '/v1/snapshot', authenticated=False)[0] == 401
             assert request('GET', '/v1/snapshot?sensor=missing')[0] == 400
+            assert request('GET', '/v1/snapshot?sensor=sample&since=253402300799')[1]['observationCount'] == 0
+            assert request('GET', '/v1/snapshot?since=invalid')[0] == 400
             device_id = data['devices'][0]['id']
             assert request('POST', '/v1/rename', {'id': device_id, 'name': 'Smoke device'})[0] == 200
             data = request('GET', '/v1/snapshot')[1]

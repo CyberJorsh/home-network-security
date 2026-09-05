@@ -6,6 +6,7 @@ type Host = {
   addresses: string[];
   suggestedCidrs: string[];
   captureError: string | null;
+  captureRemedy: 'install' | 'permission' | 'driver' | 'refresh' | null;
   discoveryAvailable: boolean;
   platform: string;
 };
@@ -15,6 +16,7 @@ type Job = {
   count: number;
   sensorId: string | null;
   error: string | null;
+  remedy?: 'install' | 'permission' | 'driver' | 'refresh' | null;
 };
 export default function HostCollection({
   onLocal,
@@ -27,6 +29,7 @@ export default function HostCollection({
   const [device, setDevice] = useState('');
   const [seconds, setSeconds] = useState('60');
   const [error, setError] = useState('');
+  const [notice, setNotice] = useState('');
   const [starting, setStarting] = useState(false);
   const [checking, setChecking] = useState(false);
   const [services, setServices] = useState(false);
@@ -96,12 +99,32 @@ export default function HostCollection({
       setStarting(false);
     }
   };
-  const start = async (kind: 'discover' | 'capture') => {
-    if (
-      (kind === 'discover' && !host?.discoveryAvailable) ||
-      (kind === 'capture' && host?.captureError)
-    ) {
+  const start = async (kind: 'discover' | 'capture', inspected = host) => {
+    if (kind === 'discover' && !inspected?.discoveryAvailable) {
       await install(kind);
+      return;
+    }
+    if (kind === 'capture' && inspected?.captureError) {
+      if (
+        inspected.captureRemedy === 'install' ||
+        inspected.captureRemedy === 'driver'
+      )
+        await install(kind);
+      else if (
+        inspected.captureRemedy === 'permission' &&
+        inspected.platform === 'macos'
+      )
+        await install(kind, true);
+      else
+        setError(
+          `${inspected.captureError} Refresh interfaces after checking the driver and this account's capture permissions.`,
+        );
+      return;
+    }
+    if (kind === 'capture' && !device) {
+      setNotice(
+        'Tools detected. Choose a capture interface, then start capture.',
+      );
       return;
     }
     setStarting(true);
@@ -121,7 +144,7 @@ export default function HostCollection({
       setStarting(false);
     }
   };
-  const busy = starting || job?.running;
+  const busy = starting || checking || job?.running || Boolean(installing);
   return (
     <section className="panel setup-panel host-collection">
       <div className="panel-heading compact">
@@ -231,7 +254,7 @@ export default function HostCollection({
           >
             <option value="">
               {host?.captureError
-                ? 'Install TShark to list interfaces'
+                ? 'Resolve the capture tool issue to list interfaces'
                 : 'Choose an interface'}
             </option>
             {host?.interfaces.map((i) => (
@@ -260,6 +283,7 @@ export default function HostCollection({
           </button>
         </form>
       </div>
+      {notice && <p role="status">{notice}</p>}
       {installing && (
         <div className="integration-status" role="status">
           <strong>Finish installation in the terminal</strong>
@@ -279,7 +303,8 @@ export default function HostCollection({
                     : !result.captureError)
                 ) {
                   setInstalling(null);
-                  setError('Tools detected. You can now start collection.');
+                  setNotice('Tools detected.');
+                  void start(installing, result);
                 } else {
                   setError(
                     'The required tools are not available yet. Complete the installer and try again.',
@@ -289,6 +314,18 @@ export default function HostCollection({
             }
           >
             Continue after installation
+          </button>
+          <button
+            className="link-button"
+            disabled={checking}
+            onClick={() => {
+              setInstalling(null);
+              setNotice(
+                'Setup dismissed. You can retry installation or use the manual instructions.',
+              );
+            }}
+          >
+            Dismiss setup
           </button>
         </div>
       )}
@@ -313,17 +350,37 @@ export default function HostCollection({
               {job.error}
             </p>
           )}
-          {job.error && job.kind === 'capture' && (
-            <button
-              className="button secondary"
-              disabled={starting}
-              onClick={() =>
-                void install('capture', host?.platform === 'macos')
-              }
-            >
-              Set up capture permissions
-            </button>
-          )}
+          {job.error &&
+            job.kind === 'capture' &&
+            (job.remedy === 'permission' ||
+              job.remedy === 'driver' ||
+              job.remedy === 'install') && (
+              <button
+                className="button secondary"
+                disabled={starting}
+                onClick={() => {
+                  if (
+                    job.remedy === 'permission' &&
+                    host?.platform === 'windows'
+                  ) {
+                    setNotice(
+                      'Use the Npcap installer to configure capture access for this account, or use an account allowed by the driver. Then refresh interfaces and retry.',
+                    );
+                  } else {
+                    void install(
+                      'capture',
+                      job.remedy === 'permission' && host?.platform === 'macos',
+                    );
+                  }
+                }}
+              >
+                {job.remedy === 'install'
+                  ? 'Install capture tools'
+                  : job.remedy === 'driver'
+                    ? 'Set up capture driver'
+                    : 'Set up capture permissions'}
+              </button>
+            )}
           <div className="button-row">
             {job.running && (
               <button

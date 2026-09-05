@@ -1,8 +1,11 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { ArrowRight, LockKeyhole, Sparkles } from 'lucide-react';
 import { command, native } from '../api';
 import { buildSummary } from '../lib';
 import type { Alert, Provider, Snapshot } from '../types';
+import SafeResponse from './SafeResponse';
+import ExplanationHistory from './ExplanationHistory';
+import { preferences, savePreferences } from '../preferences';
 import ProviderAuth, { type Auth } from './ProviderAuth';
 type Model = {
   id: string;
@@ -36,7 +39,9 @@ export default function Assistant({
   onNotice: (s: string) => void;
   onError: (s: string) => void;
 }) {
-  const [provider, setProvider] = useState<Provider>('chatgpt');
+  const [provider, setProvider] = useState<Provider>(
+    () => preferences().provider,
+  );
   const [auth, setAuth] = useState<Auth>();
   const [catalog, setCatalog] = useState<Catalog>();
   const [model, setModel] = useState('');
@@ -53,54 +58,77 @@ export default function Assistant({
   const [reviewed, setReviewed] = useState(false);
   const [sending, setSending] = useState(false);
   const [output, setOutput] = useState<Output>();
-  const [reload, setReload] = useState(0);
+  const generation = useRef(0);
+  useEffect(
+    () => () => {
+      generation.current++;
+    },
+    [],
+  );
   const signedIn = auth?.signedIn;
   useEffect(() => {
-    if (!native || !signedIn) return;
-    let alive = true;
+    if (!native || !signedIn || auth?.busy || catalog || loading || modelError)
+      return;
+    const version = generation.current;
     setLoading(true);
-    setModelError('');
     void command<Catalog>('provider_models', { provider })
       .then((value) => {
-        if (!alive) return;
+        if (version !== generation.current) return;
+        if (!value.models.length)
+          throw new Error(
+            'No subscription models are available. Refresh models or check your account.',
+          );
         setCatalog(value);
+        const saved = preferences().models[provider];
         const initial =
-          value.models.find((m) => m.isDefault) || value.models[0];
+          value.models.find((m) => m.id === saved?.model) ||
+          value.models.find((m) => m.isDefault) ||
+          value.models[0];
         setModel(initial.id);
-        setEffort(initial.defaultEffort);
+        setEffort(
+          initial.efforts.includes(saved?.effort || '')
+            ? saved!.effort
+            : initial.defaultEffort,
+        );
         setReviewed(false);
       })
       .catch((e) => {
-        if (alive) setModelError(String(e));
+        if (version === generation.current) setModelError(String(e));
       })
       .finally(() => {
-        if (alive) setLoading(false);
+        if (version === generation.current) setLoading(false);
       });
-    return () => {
-      alive = false;
-    };
-  }, [provider, signedIn, reload]);
+  }, [provider, signedIn, auth?.busy, catalog, loading, modelError]);
   useEffect(() => {
     if (!native) return;
     let alive = true;
-    const poll = () =>
-      void command<Output>('explanation_status')
-        .then((v) => {
-          if (alive) setOutput(v);
-        })
-        .catch((e) => {
-          if (alive) setModelError(String(e));
-        });
-    poll();
-    const interval = setInterval(poll, 200);
+    let timer: ReturnType<typeof setTimeout>;
+    const poll = async () => {
+      let running = false;
+      try {
+        const value = await command<Output>('explanation_status');
+        running = value.running;
+        if (alive) setOutput(value);
+      } catch (e) {
+        if (alive) onError(String(e));
+      }
+      if (alive) timer = setTimeout(() => void poll(), running ? 200 : 1500);
+    };
+    void poll();
     return () => {
       alive = false;
-      clearInterval(interval);
+      clearTimeout(timer);
     };
   }, []);
+  useEffect(() => {
+    if (model) savePreferences(provider, model, effort);
+  }, [provider, model, effort]);
   const selected = catalog?.models.find((m) => m.id === model);
   const busy = sending || output?.running;
   const name = provider === 'chatgpt' ? 'ChatGPT' : 'Grok';
+  const compactReview =
+    (prepared && !showReview) ||
+    (!prepared && Boolean(output?.text || output?.running || output?.error));
   const prepare = () => {
     try {
       setSummary(
@@ -160,6 +188,11 @@ export default function Assistant({
               aria-pressed={provider === p}
               disabled={busy}
               onClick={() => {
+                if (p === provider) return;
+                generation.current++;
+                setLoading(false);
+                setModelError('');
+                savePreferences(p);
                 setProvider(p);
                 setAuth(undefined);
                 setCatalog(undefined);
@@ -245,7 +278,8 @@ export default function Assistant({
                 disabled={busy || loading || auth?.busy}
                 onClick={() => {
                   setReviewed(false);
-                  setReload((v) => v + 1);
+                  setCatalog(undefined);
+                  setModelError('');
                 }}
               >
                 Refresh models and usage
@@ -299,7 +333,9 @@ export default function Assistant({
         </p>
       </section>
       <div className="explanation-content">
-        <section className="panel summary-panel">
+        <section
+          className={`panel summary-panel ${compactReview ? 'compact-review' : ''}`}
+        >
           <div className="panel-heading">
             <div>
               <h2>Review before sharing</h2>
@@ -307,18 +343,21 @@ export default function Assistant({
             </div>
             <LockKeyhole size={18} />
           </div>
-          {prepared && !showReview ? (
+          {compactReview ? (
             <div className="summary-actions">
               <p>The reviewed request and response appear below.</p>
               <button
                 className="button secondary"
                 disabled={busy}
                 onClick={() => {
-                  setShowReview(true);
+                  if (!prepared) prepare();
+                  else setShowReview(true);
                   setReviewed(false);
                 }}
               >
-                Edit summary for another send
+                {prepared
+                  ? 'Edit summary for another send'
+                  : 'Prepare another summary'}
               </button>
             </div>
           ) : prepared ? (
@@ -417,7 +456,7 @@ export default function Assistant({
               </details>
             )}
             <div className="response-text" aria-busy={output.running}>
-              {output.text || 'Waiting for the provider…'}
+              <SafeResponse text={output.text || 'Waiting for the provider…'} />
             </div>
             {output.error && (
               <p role="alert">
@@ -431,6 +470,10 @@ export default function Assistant({
             </p>
           </section>
         )}
+        <ExplanationHistory
+          canSave={Boolean(output?.completed && !output.running)}
+          onError={onError}
+        />
       </div>
     </div>
   );

@@ -6,8 +6,9 @@ let browserSample: Snapshot | undefined;
 export async function readSnapshot(
   mode: string,
   sensor: string | null,
+  since: number | null = null,
 ): Promise<Snapshot> {
-  if (native) return invoke<Snapshot>('snapshot', { mode, sensor });
+  if (native) return invoke<Snapshot>('snapshot', { mode, sensor, since });
   if (!browserSample) {
     const response = await fetch('/sample.json');
     if (!response.ok)

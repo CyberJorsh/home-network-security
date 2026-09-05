@@ -11,6 +11,7 @@ export interface Sensor {
   droppedPackets: number | null;
 }
 export interface DeviceDetails {
+  fieldObservedAt?: Record<string, number>;
   observedAt?: number | null;
   source?: string | null;
   hostname: string | null;
@@ -18,6 +19,7 @@ export interface DeviceDetails {
   model: string | null;
   operatingSystem: string | null;
   services: {
+    observedAt?: number | null;
     port: number;
     transport: string;
     name: string | null;
@@ -72,6 +74,7 @@ export interface Bucket {
   localBytes: number;
 }
 export interface Snapshot {
+  bucketSeconds?: number;
   mode: 'demo' | 'local' | 'collector';
   sensors: Sensor[];
   selectedSensor: string | null;

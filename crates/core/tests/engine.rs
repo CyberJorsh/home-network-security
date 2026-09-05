@@ -236,3 +236,242 @@ fn host_discovery_hints_require_matching_mac_ip_and_domain() {
     assert!(other.details.hostname.is_none());
     assert_eq!(v.totals.packets, 2);
 }
+
+#[test]
+fn mac_name_follows_dhcp_and_preserves_addresses_without_cross_sensor_merge() {
+    let mut s = store();
+    let mut first = event("before", "10.0.0.2", "203.0.113.1", 100);
+    first.src_mac = Some("02:AA:00:00:00:01".into());
+    s.ingest(std::slice::from_ref(&first)).unwrap();
+    let id = s.snapshot(None, "local").unwrap().devices[0].id.clone();
+    s.rename(&id, "Office laptop").unwrap();
+    let mut later = first.clone();
+    later.id = "after".into();
+    later.src_ip = "10.0.0.7".into();
+    later.src_mac = Some("02:aa:00:00:00:01".into());
+    later.timestamp += 3600;
+    s.ingest(&[later.clone()]).unwrap();
+    let view = s.snapshot(None, "local").unwrap();
+    assert_eq!(view.devices.len(), 1);
+    assert_eq!(view.devices[0].name, "Office laptop");
+    assert_eq!(view.devices[0].id, id);
+    assert_eq!(view.devices[0].addresses.len(), 2);
+    assert_eq!(view.devices[0].upload, 200);
+    s.set_sensor(&Sensor::new("other", "file")).unwrap();
+    later.sensor_id = "other".into();
+    s.ingest(&[later]).unwrap();
+    assert_ne!(
+        s.snapshot(Some("other"), "local").unwrap().devices[0].name,
+        "Office laptop"
+    );
+}
+#[test]
+fn shared_mac_does_not_propagate_a_name_or_merge_devices() {
+    let mut s = store();
+    let mut a = event("a", "10.0.0.2", "203.0.113.1", 100);
+    a.src_mac = Some("02:00:00:00:00:01".into());
+    let mut b = a.clone();
+    b.id = "b".into();
+    b.src_ip = "10.0.0.3".into();
+    s.ingest(&[a, b]).unwrap();
+    let view = s.snapshot(None, "local").unwrap();
+    s.rename(&view.devices[0].id, "Only this address").unwrap();
+    let view = s.snapshot(None, "local").unwrap();
+    assert_eq!(view.devices.len(), 2);
+    assert_eq!(
+        view.devices
+            .iter()
+            .filter(|d| d.name == "Only this address")
+            .count(),
+        1
+    );
+    assert!(view
+        .devices
+        .iter()
+        .all(|d| d.identification.contains("ambiguous")));
+}
+#[test]
+fn old_address_names_migrate_to_mac_identity_and_conflicts_stay_separate() {
+    let mut s = store();
+    let mut e = event("a", "10.0.0.2", "203.0.113.1", 10);
+    e.src_mac = Some("02:00:00:00:00:01".into());
+    s.rename(&device_id("test", &e.src_ip, &e.src_mac), "Old label")
+        .unwrap();
+    s.ingest(&[e.clone()]).unwrap();
+    assert_eq!(
+        s.snapshot(None, "local").unwrap().devices[0].name,
+        "Old label"
+    );
+    e.id = "b".into();
+    e.timestamp += 3600;
+    e.src_ip = "10.0.0.9".into();
+    s.ingest(&[e.clone()]).unwrap();
+    assert_eq!(
+        s.snapshot(None, "local").unwrap().devices[0].name,
+        "Old label"
+    );
+    s.rename(
+        &device_id("test", &e.src_ip, &e.src_mac),
+        "Conflicting label",
+    )
+    .unwrap();
+    assert_eq!(s.snapshot(None, "local").unwrap().devices.len(), 2);
+}
+#[test]
+fn rediscovery_preserves_services_and_first_seen_but_not_across_mac_reuse() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("fixture.db");
+    let s = Store::open(&path).unwrap();
+    s.set_sensor(&Sensor::new("test", "nmap")).unwrap();
+    let found = DiscoveredDevice {
+        ip: "10.0.0.2".into(),
+        mac: Some("02:00:00:00:00:01".into()),
+        hostname: None,
+        vendor: None,
+        details: DeviceDetails {
+            operating_system: Some("Observed OS guess".into()),
+            services: vec![ObservedService {
+                observed_at: None,
+                port: 22,
+                transport: "tcp".into(),
+                name: Some("ssh".into()),
+                product: None,
+                version: None,
+            }],
+            ..Default::default()
+        },
+    };
+    s.save_discovery("test", std::slice::from_ref(&found))
+        .unwrap();
+    let conn = rusqlite::Connection::open(&path).unwrap();
+    conn.execute("UPDATE discovery_first SET ts=100", [])
+        .unwrap();
+    let mut basic = found.clone();
+    basic.details = DeviceDetails::default();
+    s.save_discovery("test", &[basic.clone()]).unwrap();
+    let view = s.snapshot(None, "local").unwrap();
+    assert_eq!(view.devices[0].first_seen, 100);
+    assert_eq!(view.devices[0].details.services.len(), 1);
+    assert!(view.devices[0].details.operating_system.is_some());
+    let observed = view.devices[0].details.services[0].observed_at;
+    assert!(observed.is_some());
+    basic.mac = Some("02:00:00:00:00:02".into());
+    s.save_discovery("test", &[basic]).unwrap();
+    let view = s.snapshot(None, "local").unwrap();
+    assert!(view.devices[0].details.services.is_empty());
+    assert!(view.devices[0].first_seen > 100);
+}
+#[test]
+fn acknowledging_one_upload_hour_does_not_acknowledge_the_next() {
+    let mut s = store();
+    let first = event("a", "10.0.0.2", "203.0.113.1", 60 * 1024 * 1024);
+    s.ingest(std::slice::from_ref(&first)).unwrap();
+    let view = s.snapshot(None, "local").unwrap();
+    let id = view
+        .alerts
+        .iter()
+        .find(|a| a.severity == "notice")
+        .unwrap()
+        .id
+        .clone();
+    s.acknowledge(&id).unwrap();
+    let mut next = first;
+    next.id = "b".into();
+    next.timestamp += 3600;
+    s.ingest(&[next]).unwrap();
+    let view = s.snapshot(None, "local").unwrap();
+    let alerts: Vec<_> = view
+        .alerts
+        .iter()
+        .filter(|a| a.severity == "notice")
+        .collect();
+    assert_eq!(alerts.len(), 2);
+    assert_eq!(alerts.iter().filter(|a| a.acknowledged).count(), 1);
+    assert!(alerts.iter().any(|a| a.id != id && !a.acknowledged));
+}
+#[test]
+fn time_ranges_use_all_retained_events_and_keep_identity_history() {
+    let mut s = store();
+    let mut events = Vec::new();
+    for i in 0..10001 {
+        let mut e = event(&format!("a{i}"), "10.0.0.2", "203.0.113.1", 1);
+        e.timestamp += i;
+        e.src_mac = Some("02:00:00:00:00:01".into());
+        events.push(e);
+    }
+    s.ingest(&events).unwrap();
+    let all = s.snapshot(None, "local").unwrap();
+    assert_eq!(all.totals.upload, 10001);
+    let view = s
+        .snapshot_since(None, "local", Some(events[10000].timestamp))
+        .unwrap();
+    assert_eq!(view.totals.upload, 1);
+    assert_eq!(view.devices[0].first_seen, events[0].timestamp);
+    s.set_storage_limit(1000).unwrap();
+    let mut next = events[10000].clone();
+    next.id = "last".into();
+    next.timestamp += 1;
+    s.ingest(&[next]).unwrap();
+    let view = s.snapshot(None, "local").unwrap();
+    assert_eq!(view.retained_count, 1000);
+    assert_eq!(view.devices[0].first_seen, events[0].timestamp);
+}
+#[test]
+fn export_and_delete_include_saved_explanations_without_credentials() {
+    let mut s = store();
+    s.ingest(&[event("a", "10.0.0.2", "203.0.113.1", 1)])
+        .unwrap();
+    for i in 0..21 {
+        s.save_explanation(
+            &serde_json::json!({"text":format!("synthetic {i}"),"summary":"fixture"}),
+        )
+        .unwrap();
+    }
+    assert_eq!(s.explanation_history().unwrap().len(), 20);
+    let value = s.export_local().unwrap();
+    assert_eq!(value["observations"].as_array().unwrap().len(), 1);
+    assert_eq!(value["explanation_history"].as_array().unwrap().len(), 20);
+    assert!(value.get("providers").is_none());
+    s.clear_local_data().unwrap();
+    assert!(s.explanation_history().unwrap().is_empty());
+    assert!(s.sensors().unwrap().is_empty());
+    assert_eq!(s.storage_limit().unwrap(), 100000);
+}
+
+#[test]
+fn a_later_shared_mac_keeps_the_original_name_on_its_original_address() {
+    let mut s = store();
+    let mut a = event("a", "10.0.0.2", "203.0.113.1", 10);
+    a.src_mac = Some("02:00:00:00:00:01".into());
+    s.ingest(std::slice::from_ref(&a)).unwrap();
+    let view = s.snapshot(None, "local").unwrap();
+    s.rename(&view.devices[0].id, "Original device").unwrap();
+    s.acknowledge(&format!(
+        "device:{}",
+        device_id("test", &a.src_ip, &a.src_mac)
+    ))
+    .unwrap();
+    assert!(s.snapshot(None, "local").unwrap().alerts[0].acknowledged);
+    let mut b = a;
+    b.id = "b".into();
+    b.src_ip = "10.0.0.3".into();
+    s.ingest(&[b]).unwrap();
+    let view = s.snapshot(None, "local").unwrap();
+    assert_eq!(view.devices.len(), 2);
+    assert_eq!(
+        view.devices
+            .iter()
+            .find(|d| d.addresses[0] == "10.0.0.2")
+            .unwrap()
+            .name,
+        "Original device"
+    );
+    assert_ne!(
+        view.devices
+            .iter()
+            .find(|d| d.addresses[0] == "10.0.0.3")
+            .unwrap()
+            .name,
+        "Original device"
+    );
+}

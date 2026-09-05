@@ -43,3 +43,9 @@ Physical Windows login, inference, installation prompts, and capture-driver beha
 - [Codex App Server](https://learn.chatgpt.com/docs/app-server) and [authentication](https://learn.chatgpt.com/docs/auth).
 - [Grok Build headless scripting](https://docs.x.ai/build/cli/headless-scripting), [CLI reference](https://docs.x.ai/build/cli/reference), and [first-party source](https://github.com/xai-org/grok-build). ACP extension method names have an underscore prefix on the wire, for example `_x.ai/billing`.
 - [Grok subscription policies](https://docs.x.ai/grok/faq) and [enterprise authentication configuration](https://docs.x.ai/build/enterprise).
+
+## Local preferences and optional history
+
+Provider/model/effort choices are stored locally without credentials. Model availability is checked again when returning to the page; an in-progress request holds the account lease and model loading waits for it. Status requests are serialized, with slower idle polling.
+
+Completed explanations are saved only when the user clicks Save completed explanation. The local database keeps up to 20 exact request/response pairs; duplicate saves do not add duplicates. Users can inspect and delete saved items or export them with local data. Responses render a small Markdown subset as React text, without raw HTML, remote images, or executable links. Client version containment gates remain in force.

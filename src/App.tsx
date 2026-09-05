@@ -32,6 +32,7 @@ import { acknowledge, command, native, readSnapshot, rename } from './api';
 import { alertTitle, bytes, date, filterConversations } from './lib';
 import Chart from './components/Chart';
 import HostCollection from './components/HostCollection';
+import StorageControls from './components/StorageControls';
 import Assistant from './components/Assistant';
 import TrafficTable from './components/TrafficTable';
 
@@ -87,6 +88,7 @@ function DeviceIcon({ name, size = 20 }: { name: string; size?: number }) {
 
 export default function App() {
   const [page, setPage] = useState<Page>('overview');
+  const [range, setRange] = useState('all');
   const [mode, setMode] = useState(native ? 'local' : 'demo');
   const [sensor, setSensor] = useState<string | null>(null);
   const [snapshot, setSnapshot] = useState<Snapshot | null>(null);
@@ -104,7 +106,13 @@ export default function App() {
     async (sourceMode: string, sourceSensor: string | null) => {
       const seq = ++sequence.current;
       try {
-        const next = await readSnapshot(sourceMode, sourceSensor);
+        const next = await readSnapshot(
+          sourceMode,
+          sourceSensor,
+          range === 'all'
+            ? null
+            : Math.floor(Date.now() / 1000) - Number(range),
+        );
         if (seq === sequence.current) {
           setSnapshot(next);
           setError('');
@@ -113,7 +121,7 @@ export default function App() {
         if (seq === sequence.current) setError(String(e));
       }
     },
-    [],
+    [range],
   );
   const refresh = useCallback(
     () => loadSnapshot(mode, sensor),
@@ -257,6 +265,18 @@ export default function App() {
             <strong>{navigation.find((n) => n.id === page)?.label}</strong>
           </div>
           <div className="top-actions">
+            {native && (
+              <select
+                aria-label="Traffic time range"
+                value={range}
+                onChange={(e) => setRange(e.target.value)}
+              >
+                <option value="all">All retained traffic</option>
+                <option value="3600">Last hour</option>
+                <option value="86400">Last day</option>
+                <option value="604800">Last week</option>
+              </select>
+            )}
             {snapshot && snapshot.sensors.length > 1 && (
               <select
                 className="sensor-select"
@@ -403,7 +423,11 @@ export default function App() {
                     <div className="panel-heading">
                       <div>
                         <h2>Network activity</h2>
-                        <p>Observed volume · five-minute intervals</p>
+                        <p>
+                          Observed volume ·{' '}
+                          {Math.round((snapshot.bucketSeconds || 300) / 60)}
+                          -minute intervals
+                        </p>
                       </div>
                       <span className="quiet-select">
                         {snapshot.timeline.length
@@ -425,7 +449,10 @@ export default function App() {
                         Between devices
                       </span>
                     </div>
-                    <Chart timeline={snapshot.timeline} />
+                    <Chart
+                      bucketSeconds={snapshot.bucketSeconds}
+                      timeline={snapshot.timeline}
+                    />
                   </section>
                   <div className="overview-columns">
                     <section className="panel">
@@ -737,11 +764,14 @@ export default function App() {
                 <Collection
                   snapshot={snapshot}
                   busy={busy}
-                  onLocal={(id) => {
-                    setMode('local');
-                    setSensor(id);
-                    void loadSnapshot('local', id);
-                  }}
+                  onLocal={(id) =>
+                    void run(async () => {
+                      await command('disconnect_collector');
+                      setMode('local');
+                      setSensor(id);
+                      await loadSnapshot('local', id);
+                    })
+                  }
                   onImport={importFile}
                   onSample={() => {
                     setMode('demo');
@@ -774,6 +804,15 @@ export default function App() {
                       setNotice('Local prefixes saved.');
                     })
                   }
+                />
+              )}
+              {page === 'collection' && (
+                <StorageControls
+                  onError={setError}
+                  onChanged={() => {
+                    setSensor(null);
+                    void loadSnapshot(mode, null);
+                  }}
                 />
               )}
               {page === 'assistant' && (
@@ -880,10 +919,26 @@ export default function App() {
               <dt>Reported vendor</dt>
               <dd>{selectedDevice.details?.vendor || 'Not observed'}</dd>
               <dt>Model</dt>
-              <dd>{selectedDevice.details?.model || 'Not observed'}</dd>
+              <dd>
+                {selectedDevice.details?.model || 'Not observed'}
+                {selectedDevice.details?.fieldObservedAt?.model && (
+                  <small>
+                    Observed{' '}
+                    {date(selectedDevice.details.fieldObservedAt.model)}
+                  </small>
+                )}
+              </dd>
               <dt>Operating system</dt>
               <dd>
                 {selectedDevice.details?.operatingSystem || 'Not observed'}
+                {selectedDevice.details?.fieldObservedAt?.operatingSystem && (
+                  <small>
+                    Observed{' '}
+                    {date(
+                      selectedDevice.details.fieldObservedAt.operatingSystem,
+                    )}
+                  </small>
+                )}
               </dd>
               <dt>Discovered services</dt>
               <dd>
@@ -891,12 +946,14 @@ export default function App() {
                   ? selectedDevice.details.services
                       .map(
                         (s) =>
-                          `${s.port}/${s.transport} ${s.name || ''} ${s.product || ''} ${s.version || ''}`,
+                          `${s.port}/${s.transport} ${s.name || ''} ${s.product || ''} ${s.version || ''}${s.observedAt ? ` (observed ${date(s.observedAt)})` : ' (time unknown)'}`,
                       )
                       .join(', ')
                   : 'Not observed'}
               </dd>
-              <dt>First in retained observations</dt>
+              <dt>Identity evidence</dt>
+              <dd>{selectedDevice.identification}</dd>
+              <dt>First observed</dt>
               <dd>{date(selectedDevice.firstSeen)}</dd>
               <dt>Last observed</dt>
               <dd>{date(selectedDevice.lastSeen)}</dd>

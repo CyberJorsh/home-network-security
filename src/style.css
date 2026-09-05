@@ -1630,3 +1630,35 @@ main {
   overflow-y: auto;
   font-size: 12px;
 }
+
+.formatted-response {
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
+.formatted-response p {
+  white-space: pre-wrap;
+  line-height: 1.65;
+}
+.formatted-response pre {
+  overflow-x: auto;
+  white-space: pre-wrap;
+  padding: 14px;
+  background: var(--bg);
+  border-radius: 8px;
+}
+.formatted-response li {
+  margin-block: 6px;
+}
+.formatted-response h3 {
+  margin-top: 20px;
+}
+.storage-controls {
+  margin-top: 20px;
+}
+.top-actions select {
+  max-width: 205px;
+}
+
+.summary-panel.compact-review {
+  min-height: 0;
+}

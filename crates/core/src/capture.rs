@@ -32,6 +32,7 @@ pub fn capture(
     sensor.interface = interface.into();
     sensor.kind = "tshark".into();
     sensor.status = "collecting".into();
+    sensor.dropped_packets = None;
     let mut child = tshark_command()
         .args(["-i", interface, "-a", &format!("duration:{seconds}")])
         .stdout(Stdio::piped())
@@ -43,10 +44,19 @@ pub fn capture(
         let _ = child.wait();
         return Err(error);
     }
-    let stderr = child.stderr.take().context("Missing diagnostics")?;
+    let mut stderr = child.stderr.take().context("Missing diagnostics")?;
     let diagnostics = std::thread::spawn(move || {
         let mut output = Vec::new();
-        let _ = stderr.take(65536).read_to_end(&mut output);
+        let mut chunk = [0u8; 4096];
+        while let Ok(n) = stderr.read(&mut chunk) {
+            if n == 0 {
+                break;
+            }
+            output.extend_from_slice(&chunk[..n]);
+            if output.len() > 65536 {
+                output.drain(..output.len() - 65536);
+            }
+        }
         String::from_utf8_lossy(&output).into_owned()
     });
     let stdout = child.stdout.take().context("Missing capture stream")?;
@@ -128,6 +138,11 @@ pub fn capture(
         .into_iter()
         .find(|s| s.id == sensor_id)
         .and_then(|s| s.last_seen);
+    sensor.dropped_packets = if status.success() && failure.is_none() && !stopped {
+        reported_drops(&diagnostic)
+    } else {
+        None
+    };
     store.set_sensor(&sensor)?;
     if let Some(error) = failure {
         bail!("{error}");
@@ -140,4 +155,49 @@ pub fn capture(
     }
     progress(count);
     Ok(count)
+}
+
+// Use only the capture engine's explicit final counter; absent/interrupted reports stay unknown.
+pub fn reported_drops(diagnostic: &str) -> Option<u64> {
+    diagnostic
+        .lines()
+        .filter_map(|line| {
+            let mut words = line.split_whitespace();
+            if let (Some(count), Some(packet), Some("dropped")) =
+                (words.next(), words.next(), words.next())
+            {
+                if packet == "packet" || packet == "packets" {
+                    return count.parse::<u64>().ok();
+                }
+            }
+            let rest = line.split_once("Packets received/dropped on interface ")?.1;
+            let counts = rest.rsplit_once(": ")?.1.split_whitespace().next()?;
+            let (_, dropped) = counts.split_once('/')?;
+            dropped.parse::<u64>().ok()
+        })
+        .try_fold(None, |total: Option<u64>, n| {
+            Some(Some(total.unwrap_or(0).checked_add(n)?))
+        })
+        .flatten()
+}
+#[cfg(test)]
+mod tests {
+    use super::*;
+    #[test]
+    fn drop_counts_require_explicit_reports() {
+        assert_eq!(
+            reported_drops(
+                "Packets received/dropped on interface 'fixture0': 100/3 (pcap:3/dumpcap:0)"
+            ),
+            Some(3)
+        );
+        assert_eq!(
+            reported_drops("Packets received/dropped on interface 'fixture0': 100/0 (100.0%)"),
+            Some(0)
+        );
+        assert_eq!(reported_drops("3 packets dropped from fixture0"), Some(3));
+        assert_eq!(reported_drops("1 packet dropped"), Some(1));
+        assert_eq!(reported_drops("100 packets captured"), None);
+        assert_eq!(reported_drops("Capture stopped"), None);
+    }
 }

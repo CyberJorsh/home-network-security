@@ -102,6 +102,7 @@ export function buildSummary(
     device: redact ? 'selected-device' : device.name,
     deviceDetails: {
       evidence: 'D1',
+      identityFieldObservedAt: device.details?.fieldObservedAt || {},
       discoveryObservedAt: device.details?.observedAt
         ? date(device.details.observedAt)
         : 'Not available',
@@ -129,6 +130,11 @@ export function buildSummary(
         .slice(0, 128)
         .map((s, i) => ({
           evidence: `S${i + 1}`,
+          observedAt: s.observedAt
+            ? date(s.observedAt)
+            : 'Unknown; may be historical',
+          freshness:
+            'Last observed open; not proof this service is still running',
           port: s.port,
           transport: protocol(s.transport),
           name: redact ? undefined : s.name,
@@ -138,8 +144,14 @@ export function buildSummary(
       note: 'Discovery hints are not verified identity. A traffic destination port does not prove a service runs on this device.',
     },
     window: {
-      firstObservation: date(device.firstSeen),
-      lastObservation: date(device.lastSeen),
+      deviceFirstSeen: date(device.firstSeen),
+      deviceLastSeen: date(device.lastSeen),
+      trafficFrom: snapshot.timeline.length
+        ? date(Math.min(...snapshot.timeline.map((b) => b.timestamp)))
+        : 'No traffic in this view',
+      trafficThrough: snapshot.timeline.length
+        ? date(Math.max(...snapshot.timeline.map((b) => b.timestamp)))
+        : 'No traffic in this view',
     },
     coverage: {
       internet: coverage(selectedSensor?.internetCoverage),

@@ -61,6 +61,7 @@ let response = {
   completed: false,
 };
 beforeEach(() => {
+  localStorage.clear();
   signedIn = true;
   missing = false;
   response = { ...response, running: false, text: '', completed: false };
@@ -95,6 +96,7 @@ beforeEach(() => {
           addresses: [],
           suggestedCidrs: ['10.0.0.0/24'],
           captureError: missing ? 'Not installed' : null,
+          captureRemedy: missing ? 'install' : null,
           discoveryAvailable: !missing,
           platform: 'macos',
         };
@@ -229,4 +231,124 @@ describe('collection dependency setup', () => {
       ).toBe(false);
     },
   );
+});
+
+describe('recovery and saved preferences', () => {
+  it('waits for a running provider, then loads models without a manual refresh', async () => {
+    const original = vi.mocked(command).getMockImplementation()!;
+    let providerBusy = true;
+    vi.mocked(command).mockImplementation(async (name, args) =>
+      name === 'auth_status'
+        ? { ...((await original(name, args)) as object), busy: providerBusy }
+        : original(name, args),
+    );
+    mount();
+    await screen.findByText('ChatGPT connected');
+    expect(
+      vi.mocked(command).mock.calls.filter(([n]) => n === 'provider_models'),
+    ).toHaveLength(0);
+    providerBusy = false;
+    await screen.findByRole(
+      'option',
+      { name: 'Fixture model' },
+      { timeout: 2500 },
+    );
+    expect(
+      vi.mocked(command).mock.calls.filter(([n]) => n === 'provider_models'),
+    ).toHaveLength(1);
+  });
+  it('remembers provider and effort after leaving and returning', async () => {
+    const user = userEvent.setup();
+    mount();
+    await screen.findByRole('option', { name: 'Fixture model' });
+    await user.click(screen.getByRole('button', { name: 'Grok' }));
+    await screen.findByText('Grok connected');
+    await screen.findByRole('option', { name: 'Fixture model' });
+    await user.selectOptions(screen.getByLabelText('Reasoning effort'), 'high');
+    cleanup();
+    mount();
+    await screen.findByText('Grok connected');
+    await screen.findByRole('option', { name: 'Fixture model' });
+    expect(
+      (screen.getByLabelText('Reasoning effort') as HTMLSelectElement).value,
+    ).toBe('high');
+  });
+  it('does not discard the catalog when its own request makes the provider busy', async () => {
+    const original = vi.mocked(command).getMockImplementation()!;
+    let providerBusy = false;
+    let finish: ((value: typeof catalog) => void) | undefined;
+    vi.mocked(command).mockImplementation(async (name, args) => {
+      if (name === 'auth_status')
+        return {
+          ...((await original(name, args)) as object),
+          busy: providerBusy,
+        };
+      if (name === 'provider_models') {
+        providerBusy = true;
+        return new Promise((resolve) => {
+          finish = resolve;
+        });
+      }
+      return original(name, args);
+    });
+    mount();
+    await waitFor(() => expect(finish).toBeDefined());
+    await new Promise((resolve) => setTimeout(resolve, 800));
+    finish!(catalog);
+    await screen.findByRole('option', { name: 'Fixture model' });
+    expect(
+      vi.mocked(command).mock.calls.filter(([n]) => n === 'provider_models'),
+    ).toHaveLength(1);
+  });
+});
+describe('capture failure diagnosis', () => {
+  it.each(['permission', 'refresh'] as const)(
+    'does not reinstall TShark for a %s failure',
+    async (remedy) => {
+      const original = vi.mocked(command).getMockImplementation()!;
+      vi.mocked(command).mockImplementation(async (name, args) =>
+        name === 'inspect_host'
+          ? {
+              ...((await original(name, args)) as object),
+              platform: 'windows',
+              captureError: 'Interface check failed',
+              captureRemedy: remedy,
+            }
+          : original(name, args),
+      );
+      const user = userEvent.setup();
+      render(<HostCollection onLocal={() => {}} />);
+      await screen.findByText('Interface check failed');
+      await user.click(screen.getByRole('button', { name: 'Start capture' }));
+      expect(
+        vi
+          .mocked(command)
+          .mock.calls.filter(([n]) => n === 'install_collection_tool'),
+      ).toHaveLength(0);
+      expect(
+        screen.queryByText(/Refresh interfaces after checking/),
+      ).not.toBeNull();
+    },
+  );
+  it('resumes discovery after installation is detected', async () => {
+    missing = true;
+    const original = vi.mocked(command).getMockImplementation()!;
+    vi.mocked(command).mockImplementation(async (name, args) =>
+      name === 'start_collection' ? 'fixture-sensor' : original(name, args),
+    );
+    const user = userEvent.setup();
+    const onLocal = vi.fn();
+    render(<HostCollection onLocal={onLocal} />);
+    await screen.findByText('Not installed');
+    await user.click(screen.getByRole('button', { name: 'Discover devices' }));
+    await screen.findByText('Finish installation in the terminal');
+    missing = false;
+    await user.click(
+      screen.getByRole('button', { name: 'Continue after installation' }),
+    );
+    await waitFor(() => expect(onLocal).toHaveBeenCalledWith('fixture-sensor'));
+    expect(
+      vi.mocked(command).mock.calls.filter(([n]) => n === 'start_collection'),
+    ).toHaveLength(1);
+  });
 });

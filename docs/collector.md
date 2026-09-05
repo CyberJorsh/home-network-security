@@ -63,7 +63,7 @@ PCAP input is capped at 256 MiB, decoded output at 64 MiB, and 100,000 IP frames
 
 CLI default: `.data/network.db` in your working directory. Desktop: Tauri's per-user local application-data directory under identifier `io.github.cyberjorsh.home-network-security`. On macOS this is normally `~/Library/Application Support/io.github.cyberjorsh.home-network-security`; on Windows it is normally under `%LOCALAPPDATA%`. Sample mode is a separate in-memory database.
 
-The desktop polls every ten seconds. The latest 100,000 normalized observations are retained, with 10,000 per selected view. Device notes and review state persist separately. No archival rollups, wall-clock retention controls, or secure erase workflow are implemented yet.
+The desktop polls every ten seconds. A configurable global record limit retains up to 100,000 observations. Time ranges include all retained records in the chosen range; charts group wide ranges into larger buckets. MAC identities, names, and first-seen metadata persist separately. Shared/overlapping MAC evidence stays address-specific. Local storage controls provide JSON export and confirmed deletion; this is logical deletion, not a forensic secure erase guarantee. No durable archival traffic rollups or wall-clock retention policy is implemented.
 
 ## Desktop collection controls
 
