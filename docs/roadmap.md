@@ -2,17 +2,17 @@
 
 The source is an early functional alpha. Publishing it does not complete the full product brief.
 
-| Area                     | Current implementation                                            | Remaining acceptance gate                                                                                     |
-| ------------------------ | ----------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------- |
-| Windows + Mac desktop    | Shared Tauri/React source and native CI build jobs                | Real Windows GUI/driver exercise; signed/notarized installers and full third-party distribution notices       |
-| Device discovery         | Explicit Nmap CLI and native XML import                           | Fresh-machine installer acceptance; IPv6 discovery strategy                                                   |
-| Internet + local traffic | TShark adapter and accounting for both directions                 | Physical test topology proving both WAN and between-device coverage, cross-platform packet-drop validation    |
-| Hardware flexibility     | Local/remote collector, SSH tunnel, explicit coverage gaps        | Verified router/AP/export adapters and deployment recipes on actual supported hardware                        |
-| Device inventory         | MAC-linked names/address history with ambiguity guards            | Explicit cross-sensor linking and randomized-MAC reconciliation                                               |
-| Traffic history          | Time ranges, adjustable retention, local export/delete            | Durable rollups, wall-clock retention, sustained-rate measurements                                            |
-| Alerts                   | Evidence-backed observed-device and large-upload observations     | User-configurable rules, baseline/change detection and false-positive evaluation                              |
-| Optional subscription AI | Subscription streaming, saved preferences, optional local history | Physical Windows account/inference validation; independent containment review; broader client-version support |
-| Local privacy            | No telemetry/cloud backend; native storage boundary               | Installation review and independent security review                                                           |
+| Area                     | Current implementation                                                     | Remaining acceptance gate                                                                                     |
+| ------------------------ | -------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------- |
+| Windows + Mac desktop    | Shared Tauri/React source and native CI build jobs                         | Real Windows GUI/driver exercise; signed/notarized installers and full third-party distribution notices       |
+| Device discovery         | Guided native Nmap discovery and service inspection                        | Fresh-machine installer acceptance; IPv6 discovery strategy                                                   |
+| Internet + local traffic | TShark adapter and accounting for both directions                          | Physical test topology proving both WAN and between-device coverage, cross-platform packet-drop validation    |
+| Hardware flexibility     | Local/remote collector, SSH tunnel, explicit coverage gaps                 | Verified router/AP/export adapters and deployment recipes on actual supported hardware                        |
+| Device inventory         | MAC-linked names/address history with ambiguity guards                     | Explicit cross-sensor linking and randomized-MAC reconciliation                                               |
+| Traffic history          | Time ranges, adjustable retention, local export/delete                     | Durable rollups, wall-clock retention, sustained-rate measurements                                            |
+| Alerts                   | Evidence-backed device observations and configurable hourly upload notices | Baseline/change detection and broader false-positive evaluation                                               |
+| Optional subscription AI | Subscription streaming, saved preferences, optional local history          | Physical Windows account/inference validation; independent containment review; broader client-version support |
+| Local privacy            | No telemetry/cloud backend; native storage boundary                        | Installation review and independent security review                                                           |
 
 Use repository issues to scope these gates. A gate is closed by direct evidence for the target environment, not by changing this table or passing a compiler.
 

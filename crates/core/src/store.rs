@@ -381,6 +381,16 @@ impl Store {
                 }
             }
         }
+        // Sending a probe is not evidence that its destination exists. Only create
+        // destination devices when a packet source or discovery established presence.
+        let mut known_sources: HashSet<String> =
+            devices.values().flat_map(|d| d.addresses.clone()).collect();
+        let mut source_stmt = self.conn.prepare(
+            "SELECT DISTINCT json_extract(body,'$.srcIp') FROM observations WHERE sensor=?1",
+        )?;
+        for ip in source_stmt.query_map([&selected], |r| r.get::<_, String>(0))? {
+            known_sources.insert(ip?);
+        }
         let mut conversations: BTreeMap<String, Conversation> = BTreeMap::new();
         let mut timeline: BTreeMap<i64, Bucket> = BTreeMap::new();
         let span = observations
@@ -394,7 +404,8 @@ impl Store {
         for o in &observations {
             let src_local = local(&o.src_ip, &nets) && unicast(&o.src_ip);
             let dst_local = local(&o.dst_ip, &nets) && unicast(&o.dst_ip);
-            let direction = if !unicast(&o.dst_ip) {
+            let group_destination = !unicast(&o.dst_ip) || group_mac(&o.dst_mac);
+            let direction = if group_destination {
                 "multicast"
             } else {
                 match (src_local, dst_local) {
@@ -405,7 +416,8 @@ impl Store {
                 }
             };
             let src_id = src_local.then(|| identities.id(&o.src_ip, &o.src_mac));
-            let dst_id = dst_local.then(|| identities.id(&o.dst_ip, &o.dst_mac));
+            let dst_id = (dst_local && !group_destination && known_sources.contains(&o.dst_ip))
+                .then(|| identities.id(&o.dst_ip, &o.dst_mac));
             for (id, ip, mac, source) in [
                 (&src_id, &o.src_ip, &o.src_mac, true),
                 (&dst_id, &o.dst_ip, &o.dst_mac, false),
@@ -548,6 +560,9 @@ impl Store {
         for d in devices.values_mut() {
             let ip = d.addresses.first().cloned().unwrap_or_default();
             d.identification = identities.description(&ip, &d.mac);
+            if usable_mac(&d.mac).is_some_and(|mac| identities.routed.contains(&mac)) {
+                d.mac = None;
+            }
             if let Some((first, last, addresses)) = identities.history(&ip, &d.mac) {
                 d.first_seen = d.first_seen.min(first);
                 d.last_seen = d.last_seen.max(last);
@@ -568,12 +583,13 @@ impl Store {
                 detail:"This device appears in retained observations. This does not establish when it joined your network or whether it is trusted.".into(),
                 evidence:device_evidence.get(&d.id).cloned().unwrap_or_default(),timestamp:d.first_seen });
         }
+        let rules = self.alert_rules()?;
         for ((device_id, hour), (bytes, evidence, timestamp)) in uploads {
-            if bytes < 50 * 1024 * 1024 {
+            if !rules.upload_enabled || bytes < rules.upload_threshold_mib * 1024 * 1024 {
                 continue;
             }
             let id = format!("upload:{device_id}:{hour}");
-            alerts.push(Alert { acknowledged: acknowledged.contains(&id), id, device_id, severity:"notice".into(),title:"Large observed upload".into(),detail:format!("At least 50 MiB sent outside configured local networks in the UTC hour beginning {}. This view may cover only part of that hour. Backups and video calls can explain this; it is not a malware finding.", chrono::DateTime::from_timestamp(hour,0).map(|v|v.to_rfc3339()).unwrap_or_default()), evidence,timestamp });
+            alerts.push(Alert { acknowledged: acknowledged.contains(&id), id, device_id, severity:"notice".into(),title:"Large observed upload".into(),detail:format!("At least {} MiB sent outside configured local networks in the UTC hour beginning {}. This view may cover only part of that hour. Backups and video calls can explain this; it is not a malware finding.", rules.upload_threshold_mib, chrono::DateTime::from_timestamp(hour,0).map(|v|v.to_rfc3339()).unwrap_or_default()), evidence,timestamp });
         }
         alerts.sort_by_key(|a| std::cmp::Reverse(a.timestamp));
         let mut conversations: Vec<_> = conversations.into_values().collect();
@@ -626,9 +642,13 @@ struct Identities {
     sensor: String,
     endpoints: BTreeMap<String, Vec<(String, i64, i64)>>,
     ambiguous: HashSet<String>,
+    routed: HashSet<String>,
 }
 impl Identities {
     fn id(&self, ip: &str, mac: &Option<String>) -> String {
+        if usable_mac(mac).is_some_and(|mac| self.routed.contains(&mac)) {
+            return device_id(&self.sensor, ip, &None);
+        }
         match usable_mac(mac) {
             Some(mac) if !self.ambiguous.contains(&mac) => format!("{}:mac:{mac}", self.sensor),
             _ => device_id(&self.sensor, ip, mac),
@@ -643,6 +663,9 @@ impl Identities {
         let id = self.id(ip, mac);
         names.get(&id).cloned().or_else(|| {
             let mac = usable_mac(mac)?;
+            if self.routed.contains(&mac) {
+                return names.get(&device_id(&self.sensor, ip, &Some(mac))).cloned();
+            }
             if self.ambiguous.contains(&mac) {
                 return None;
             }
@@ -656,6 +679,9 @@ impl Identities {
     }
     fn history(&self, ip: &str, mac: &Option<String>) -> Option<(i64, i64, Vec<String>)> {
         let mac = usable_mac(mac)?;
+        if self.routed.contains(&mac) {
+            return None;
+        }
         let entries: Vec<_> = self
             .endpoints
             .get(&mac)?
@@ -670,6 +696,7 @@ impl Identities {
     }
     fn description(&self, _ip: &str, mac: &Option<String>) -> String {
         match usable_mac(mac) {
+            Some(mac) if self.routed.contains(&mac) => "IP-only identity: the observed Ethernet MAC also carries routed traffic and may belong to a gateway. It is not treated as this endpoint’s MAC.".into(),
             Some(mac) if self.ambiguous.contains(&mac) => "Shared or ambiguous MAC: addresses overlap in time or have conflicting names. Kept separate; may be a gateway, proxy, or multiple interfaces.".into(),
             Some(_) => "MAC-linked identity within this observation source. Names follow address changes. MAC addresses can be randomized or spoofed; identity is not verified.".into(),
             None => "IP-only identity: no usable endpoint MAC observed. A reused IP may belong to another device.".into(),
@@ -699,6 +726,13 @@ impl Store {
             ))
         })? {
             let (mac, ip, first, last) = row?;
+            if usable_mac(&Some(mac.clone())).is_some()
+                && unicast(&ip)
+                && !local(&ip, nets)
+                && !link_local(&ip)
+            {
+                value.routed.insert(mac.clone());
+            }
             if usable_mac(&Some(mac.clone())).is_some() && local(&ip, nets) && unicast(&ip) {
                 value
                     .endpoints
@@ -720,6 +754,30 @@ impl Store {
             }
         }
         Ok(value)
+    }
+    pub fn alert_rules(&self) -> Result<AlertRules> {
+        let value: Option<String> = self
+            .conn
+            .query_row(
+                "SELECT value FROM settings WHERE key='alert_rules'",
+                [],
+                |r| r.get(0),
+            )
+            .optional()?;
+        let rules: AlertRules = value
+            .map(|v| serde_json::from_str(&v))
+            .transpose()?
+            .unwrap_or_default();
+        rules.validate()?;
+        Ok(rules)
+    }
+    pub fn set_alert_rules(&self, rules: &AlertRules) -> Result<()> {
+        rules.validate()?;
+        self.conn.execute(
+            "INSERT OR REPLACE INTO settings VALUES ('alert_rules',?1)",
+            [serde_json::to_string(rules)?],
+        )?;
+        Ok(())
     }
     pub fn storage_limit(&self) -> Result<usize> {
         let value: Option<String> = self

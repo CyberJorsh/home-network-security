@@ -406,7 +406,10 @@ pub fn discover_with_services(
     } else {
         command.arg("-sn");
     }
+    // Unprivileged discovery otherwise relies on very few TCP ports and can miss
+    // reachable home devices. Closed-port replies also establish reachability.
     command.args([
+        "-PS22,80,443,445,3389,8008,8080",
         "--max-retries",
         "1",
         "--host-timeout",

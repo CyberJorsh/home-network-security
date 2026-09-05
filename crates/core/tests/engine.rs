@@ -40,11 +40,9 @@ fn accounts_wan_and_lan_separately() {
         ),
         (100, 300, 500)
     );
-    assert_eq!(view.devices.len(), 2);
-    assert_eq!(
-        view.devices.iter().map(|d| d.local_bytes).sum::<u64>(),
-        1000
-    );
+    // An outgoing packet alone does not establish the second device’s presence.
+    assert_eq!(view.devices.len(), 1);
+    assert_eq!(view.devices[0].local_bytes, 500);
 }
 #[test]
 fn duplicate_import_does_not_inflate_traffic() {
@@ -474,4 +472,154 @@ fn a_later_shared_mac_keeps_the_original_name_on_its_original_address() {
             .name,
         "Original device"
     );
+}
+
+#[test]
+fn upload_rules_persist_bound_thresholds_and_preserve_hour_evidence() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("rules.db");
+    let mut s = Store::open(&path).unwrap();
+    s.set_sensor(&Sensor::new("test", "fixture")).unwrap();
+    let mut next = event("2", "10.0.0.2", "203.0.113.1", 1024 * 1024 - 1);
+    next.timestamp += 3600;
+    s.ingest(&[event("1", "10.0.0.2", "203.0.113.1", 1024 * 1024), next])
+        .unwrap();
+    assert!(!s
+        .snapshot(None, "local")
+        .unwrap()
+        .alerts
+        .iter()
+        .any(|a| a.severity == "notice"));
+    s.set_alert_rules(&AlertRules {
+        upload_enabled: true,
+        upload_threshold_mib: 1,
+    })
+    .unwrap();
+    let v = s.snapshot(None, "local").unwrap();
+    let notices: Vec<_> = v.alerts.iter().filter(|a| a.severity == "notice").collect();
+    assert_eq!(notices.len(), 1);
+    assert!(notices[0].detail.contains("At least 1 MiB"));
+    assert!(!notices[0].evidence.is_empty());
+    s.acknowledge(&notices[0].id).unwrap();
+    assert!(s
+        .set_alert_rules(&AlertRules {
+            upload_enabled: true,
+            upload_threshold_mib: 0
+        })
+        .is_err());
+    assert!(s
+        .set_alert_rules(&AlertRules {
+            upload_enabled: true,
+            upload_threshold_mib: u64::MAX
+        })
+        .is_err());
+    drop(s);
+    let s = Store::open(&path).unwrap();
+    assert_eq!(s.alert_rules().unwrap().upload_threshold_mib, 1);
+    assert!(
+        s.snapshot(None, "local")
+            .unwrap()
+            .alerts
+            .iter()
+            .find(|a| a.severity == "notice")
+            .unwrap()
+            .acknowledged
+    );
+    s.set_alert_rules(&AlertRules {
+        upload_enabled: false,
+        upload_threshold_mib: 1,
+    })
+    .unwrap();
+    assert!(!s
+        .snapshot(None, "local")
+        .unwrap()
+        .alerts
+        .iter()
+        .any(|a| a.severity == "notice"));
+}
+
+#[test]
+fn scan_targets_and_subnet_broadcasts_do_not_become_devices() {
+    let mut s = store();
+    let mut probes = Vec::new();
+    for n in 1..=254 {
+        let mut o = event(
+            &format!("probe-{n}"),
+            "10.0.0.2",
+            &format!("10.0.1.{n}"),
+            60,
+        );
+        o.src_mac = Some("02:00:00:00:00:02".into());
+        o.dst_mac = Some("02:00:00:00:00:01".into());
+        probes.push(o);
+    }
+    let mut broadcast = event("broadcast", "10.0.0.2", "10.0.0.255", 100);
+    broadcast.src_mac = Some("02:00:00:00:00:02".into());
+    broadcast.dst_mac = Some("ff:ff:ff:ff:ff:ff".into());
+    probes.push(broadcast);
+    s.ingest(&probes).unwrap();
+    let v = s.snapshot(None, "local").unwrap();
+    assert_eq!(v.devices.len(), 1);
+    assert_eq!(v.conversations.len(), 255);
+    assert!(v.conversations.iter().all(|c| c.dst_device.is_none()));
+    assert_eq!(
+        v.conversations
+            .iter()
+            .find(|c| c.dst.ends_with(".255"))
+            .unwrap()
+            .direction,
+        "multicast"
+    );
+    let mut response = event("reply", "10.0.1.8", "10.0.0.2", 60);
+    response.src_mac = Some("02:00:00:00:00:01".into());
+    response.dst_mac = Some("02:00:00:00:00:02".into());
+    s.ingest(&[response]).unwrap();
+    assert_eq!(s.snapshot(None, "local").unwrap().devices.len(), 2);
+}
+
+#[test]
+fn routed_mac_never_carries_names_between_sequential_remote_sources() {
+    let mut s = store();
+    let mut external = event("external", "203.0.113.1", "10.0.0.2", 100);
+    external.src_mac = Some("02:00:00:00:00:01".into());
+    let mut first = event("first", "10.0.1.8", "10.0.0.2", 100);
+    first.src_mac = external.src_mac.clone();
+    s.ingest(&[external, first]).unwrap();
+    let v = s.snapshot(None, "local").unwrap();
+    let d = v
+        .devices
+        .iter()
+        .find(|d| d.addresses.contains(&"10.0.1.8".into()))
+        .unwrap();
+    assert!(d.mac.is_none());
+    s.rename(&d.id, "Remote device one").unwrap();
+    let mut next = event("next", "10.0.2.9", "10.0.0.2", 100);
+    next.timestamp += 3600;
+    next.src_mac = Some("02:00:00:00:00:01".into());
+    s.ingest(&[next]).unwrap();
+    let v = s.snapshot(None, "local").unwrap();
+    assert_eq!(v.devices.len(), 2);
+    assert_eq!(
+        v.devices
+            .iter()
+            .filter(|d| d.name == "Remote device one")
+            .count(),
+        1
+    );
+    assert!(v.devices.iter().all(|d| d.mac.is_none()));
+}
+
+#[test]
+fn link_local_ipv6_is_not_evidence_of_a_router_mac() {
+    let mut s = store();
+    s.set_networks("10.0.0.0/8").unwrap();
+    let mut v4 = event("v4", "10.0.0.2", "203.0.113.1", 100);
+    v4.src_mac = Some("02:00:00:00:00:02".into());
+    let mut v6 = event("v6", "fe80::2", "ff02::1", 100);
+    v6.src_mac = v4.src_mac.clone();
+    s.ingest(&[v4, v6]).unwrap();
+    let v = s.snapshot(None, "local").unwrap();
+    assert_eq!(v.devices.len(), 1);
+    assert_eq!(v.devices[0].mac.as_deref(), Some("02:00:00:00:00:02"));
+    assert!(v.devices[0].id.contains(":mac:"));
 }

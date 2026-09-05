@@ -33,6 +33,7 @@ import { alertTitle, bytes, date, filterConversations } from './lib';
 import Chart from './components/Chart';
 import HostCollection from './components/HostCollection';
 import StorageControls from './components/StorageControls';
+import AlertControls from './components/AlertControls';
 import Assistant from './components/Assistant';
 import TrafficTable from './components/TrafficTable';
 
@@ -804,6 +805,12 @@ export default function App() {
                       setNotice('Local prefixes saved.');
                     })
                   }
+                />
+              )}
+              {page === 'collection' && (
+                <AlertControls
+                  onError={setError}
+                  onChanged={() => void refresh()}
                 />
               )}
               {page === 'collection' && (
