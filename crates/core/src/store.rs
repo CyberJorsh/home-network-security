@@ -39,6 +39,7 @@ impl Store {
         conn.execute_batch("PRAGMA journal_mode=WAL;
           CREATE TABLE IF NOT EXISTS observations(id TEXT NOT NULL, sensor TEXT NOT NULL, ts INTEGER NOT NULL, body TEXT NOT NULL, PRIMARY KEY(sensor,id));
           CREATE INDEX IF NOT EXISTS observations_time ON observations(sensor,ts);
+          CREATE INDEX IF NOT EXISTS observations_retention ON observations(ts);
           CREATE TABLE IF NOT EXISTS sensors(id TEXT PRIMARY KEY, body TEXT NOT NULL);
           CREATE TABLE IF NOT EXISTS names(id TEXT PRIMARY KEY, name TEXT NOT NULL);
           CREATE TABLE IF NOT EXISTS discovery(sensor TEXT NOT NULL, ip TEXT NOT NULL, ts INTEGER NOT NULL, body TEXT NOT NULL, PRIMARY KEY(sensor,ip));

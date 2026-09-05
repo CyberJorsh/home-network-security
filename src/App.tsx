@@ -99,18 +99,25 @@ export default function App() {
   const [assistantDevice, setAssistantDevice] = useState('');
   const [assistantAlert, setAssistantAlert] = useState<Alert | undefined>();
   const sequence = useRef(0);
-  const refresh = useCallback(async () => {
-    const seq = ++sequence.current;
-    try {
-      const next = await readSnapshot(mode, sensor);
-      if (seq === sequence.current) {
-        setSnapshot(next);
-        setError('');
+  const loadSnapshot = useCallback(
+    async (sourceMode: string, sourceSensor: string | null) => {
+      const seq = ++sequence.current;
+      try {
+        const next = await readSnapshot(sourceMode, sourceSensor);
+        if (seq === sequence.current) {
+          setSnapshot(next);
+          setError('');
+        }
+      } catch (e) {
+        if (seq === sequence.current) setError(String(e));
       }
-    } catch (e) {
-      if (seq === sequence.current) setError(String(e));
-    }
-  }, [mode, sensor]);
+    },
+    [],
+  );
+  const refresh = useCallback(
+    () => loadSnapshot(mode, sensor),
+    [loadSnapshot, mode, sensor],
+  );
   useEffect(() => {
     void refresh();
     const timer = setInterval(() => {
@@ -154,14 +161,17 @@ export default function App() {
   };
   const importFile = () =>
     run(async () => {
-      const count = await command<number | null>('import_file');
-      if (count !== null) {
+      const imported = await command<{
+        count: number;
+        sensorId: string;
+      } | null>('import_file');
+      if (imported !== null) {
         setMode('local');
-        setSensor(null);
+        setSensor(imported.sensorId);
         setNotice(
-          `Imported ${count.toLocaleString()} records into local storage.`,
+          `Imported ${imported.count.toLocaleString()} records into local storage.`,
         );
-        await refresh();
+        await loadSnapshot('local', imported.sensorId);
       }
     });
   useEffect(() => {
@@ -206,6 +216,7 @@ export default function App() {
               key={id}
               className={`nav-item ${page === id ? 'selected' : ''}`}
               onClick={() => navigate(id)}
+              aria-label={label}
               aria-current={page === id ? 'page' : undefined}
             >
               <Icon size={18} strokeWidth={1.6} />
@@ -266,7 +277,11 @@ export default function App() {
             )}
             <span className={`pill ${mode === 'demo' ? 'sample' : ''}`}>
               <span className="status-dot" />
-              {mode === 'demo' ? 'Sample network' : 'Local data'}
+              {mode === 'demo'
+                ? 'Sample network'
+                : snapshot?.mode === 'collector'
+                  ? 'Connected collector'
+                  : 'Local data'}
             </span>
             <button
               className="icon-button"
@@ -730,15 +745,16 @@ export default function App() {
                       setNotice(
                         'Collector connected. Observations remain on your devices.',
                       );
-                      await refresh();
+                      await loadSnapshot('local', null);
                     })
                   }
                   onDisconnect={() =>
                     run(async () => {
                       await command('disconnect_collector');
+                      setMode('local');
                       setSensor(null);
                       setNotice('Collector disconnected.');
-                      await refresh();
+                      await loadSnapshot('local', null);
                     })
                   }
                   onNetworks={(cidrs) =>
@@ -1208,7 +1224,10 @@ function Assistant({
             <button
               className={`provider ${provider === p ? 'chosen' : ''}`}
               key={p}
-              onClick={() => setProvider(p)}
+              onClick={() => {
+                setProvider(p);
+                setReviewed(false);
+              }}
               aria-pressed={provider === p}
             >
               <span className="provider-logo">

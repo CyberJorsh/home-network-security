@@ -41,8 +41,9 @@ def main():
         assert 'Imported 4 new' in result.stdout, result.stdout
         data = json.loads(subprocess.check_output(args + ['snapshot'], text=True))
         assert data['observationCount'] == 4
-        for key in ['upload', 'download', 'localBytes', 'multicast']:
+        for key in ['upload', 'download', 'localBytes']:
             assert data['totals'][key] == len(frames[0]), (key, data['totals'])
+        assert sum(c['bytes'] for c in data['conversations'] if c['direction'] == 'multicast') == len(frames[0])
         result = subprocess.run(args + ['import', str(capture)], capture_output=True, text=True, check=True)
         assert 'Imported 0 new' in result.stdout
         print('PASS: real TShark decoded 4 synthetic frames; WAN, LAN, multicast bytes and reimport idempotency verified')

@@ -1,7 +1,10 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 use hns_core::*;
-use serde::Deserialize;
-use std::{io::Read, sync::Mutex};
+use serde::{Deserialize, Serialize};
+use std::{
+    io::Read,
+    sync::{Arc, Mutex},
+};
 use tauri::{Manager, State};
 
 struct AppState {
@@ -55,8 +58,7 @@ fn remote_request(
     Ok(value)
 }
 
-#[tauri::command(async)]
-fn snapshot(state: State<AppState>, mode: String, sensor: Option<String>) -> CmdResult<Snapshot> {
+fn snapshot_impl(state: &AppState, mode: String, sensor: Option<String>) -> CmdResult<Snapshot> {
     if mode == "demo" {
         return state
             .demo
@@ -81,8 +83,7 @@ fn snapshot(state: State<AppState>, mode: String, sensor: Option<String>) -> Cmd
         .snapshot(sensor.as_deref(), "local")
         .map_err(error)
 }
-#[tauri::command(async)]
-fn rename_device(state: State<AppState>, mode: String, id: String, name: String) -> CmdResult<()> {
+fn rename_device_impl(state: &AppState, mode: String, id: String, name: String) -> CmdResult<()> {
     if mode == "demo" {
         return state
             .demo
@@ -106,8 +107,7 @@ fn rename_device(state: State<AppState>, mode: String, id: String, name: String)
         .rename(&id, &name)
         .map_err(error)
 }
-#[tauri::command(async)]
-fn acknowledge_alert(state: State<AppState>, mode: String, id: String) -> CmdResult<()> {
+fn acknowledge_alert_impl(state: &AppState, mode: String, id: String) -> CmdResult<()> {
     if mode == "demo" {
         return state
             .demo
@@ -131,8 +131,7 @@ fn acknowledge_alert(state: State<AppState>, mode: String, id: String) -> CmdRes
         .acknowledge(&id)
         .map_err(error)
 }
-#[tauri::command(async)]
-fn connect_collector(state: State<AppState>, port: u16, token: String) -> CmdResult<()> {
+fn connect_collector_impl(state: &AppState, port: u16, token: String) -> CmdResult<()> {
     if token.trim().len() < 32 {
         return Err("Enter the collector token (at least 32 characters)".into());
     }
@@ -145,13 +144,11 @@ fn connect_collector(state: State<AppState>, port: u16, token: String) -> CmdRes
     *state.remote.lock().map_err(error)? = Some(remote);
     Ok(())
 }
-#[tauri::command(async)]
-fn disconnect_collector(state: State<AppState>) -> CmdResult<()> {
+fn disconnect_collector_impl(state: &AppState) -> CmdResult<()> {
     *state.remote.lock().map_err(error)? = None;
     Ok(())
 }
-#[tauri::command(async)]
-fn configure_networks(state: State<AppState>, cidrs: String) -> CmdResult<()> {
+fn configure_networks_impl(state: &AppState, cidrs: String) -> CmdResult<()> {
     state
         .local
         .lock()
@@ -159,8 +156,7 @@ fn configure_networks(state: State<AppState>, cidrs: String) -> CmdResult<()> {
         .set_networks(&cidrs)
         .map_err(error)
 }
-#[tauri::command(async)]
-fn import_file(state: State<AppState>) -> CmdResult<Option<usize>> {
+fn import_file_impl(state: &AppState) -> CmdResult<Option<ImportResult>> {
     let Some(file) = rfd::FileDialog::new()
         .add_filter("Network observations", &["ndjson", "pcap", "pcapng", "xml"])
         .pick_file()
@@ -205,10 +201,12 @@ fn import_file(state: State<AppState>) -> CmdResult<Option<usize>> {
         _ => return Err("Unsupported file type".into()),
     };
     *state.remote.lock().map_err(error)? = None;
-    Ok(Some(n))
+    Ok(Some(ImportResult {
+        count: n,
+        sensor_id: sensor_id.into(),
+    }))
 }
-#[tauri::command(async)]
-fn open_provider(provider: String) -> CmdResult<()> {
+fn open_provider_impl(provider: String) -> CmdResult<()> {
     let url = match provider.as_str() {
         "chatgpt" => "https://chatgpt.com/",
         "grok" => "https://grok.com/",
@@ -227,15 +225,97 @@ fn open_provider(provider: String) -> CmdResult<()> {
     }
     Ok(())
 }
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct ImportResult {
+    count: usize,
+    sensor_id: String,
+}
+
+// Keep blocking SQLite, dialogs, subprocesses and HTTP off the webview and async workers.
+#[tauri::command]
+async fn snapshot(
+    state: State<'_, Arc<AppState>>,
+    mode: String,
+    sensor: Option<String>,
+) -> CmdResult<Snapshot> {
+    let state = state.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || snapshot_impl(&state, mode, sensor))
+        .await
+        .map_err(error)?
+}
+#[tauri::command]
+async fn rename_device(
+    state: State<'_, Arc<AppState>>,
+    mode: String,
+    id: String,
+    name: String,
+) -> CmdResult<()> {
+    let state = state.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || rename_device_impl(&state, mode, id, name))
+        .await
+        .map_err(error)?
+}
+#[tauri::command]
+async fn acknowledge_alert(
+    state: State<'_, Arc<AppState>>,
+    mode: String,
+    id: String,
+) -> CmdResult<()> {
+    let state = state.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || acknowledge_alert_impl(&state, mode, id))
+        .await
+        .map_err(error)?
+}
+#[tauri::command]
+async fn connect_collector(
+    state: State<'_, Arc<AppState>>,
+    port: u16,
+    token: String,
+) -> CmdResult<()> {
+    let state = state.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || connect_collector_impl(&state, port, token))
+        .await
+        .map_err(error)?
+}
+#[tauri::command]
+async fn disconnect_collector(state: State<'_, Arc<AppState>>) -> CmdResult<()> {
+    let state = state.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || disconnect_collector_impl(&state))
+        .await
+        .map_err(error)?
+}
+#[tauri::command]
+async fn configure_networks(state: State<'_, Arc<AppState>>, cidrs: String) -> CmdResult<()> {
+    let state = state.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || configure_networks_impl(&state, cidrs))
+        .await
+        .map_err(error)?
+}
+#[tauri::command]
+async fn import_file(state: State<'_, Arc<AppState>>) -> CmdResult<Option<ImportResult>> {
+    let state = state.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || import_file_impl(&state))
+        .await
+        .map_err(error)?
+}
+#[tauri::command]
+async fn open_provider(provider: String) -> CmdResult<()> {
+    tauri::async_runtime::spawn_blocking(move || open_provider_impl(provider))
+        .await
+        .map_err(error)?
+}
+
 fn main() {
     tauri::Builder::default()
         .setup(|app| {
             let path = app.path().app_local_data_dir()?.join("network.db");
-            app.manage(AppState {
+            app.manage(Arc::new(AppState {
                 local: Mutex::new(Store::open(&path)?),
                 demo: Mutex::new(demo_store()?),
                 remote: Mutex::new(None),
-            });
+            }));
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![

@@ -14,4 +14,3 @@ uuid.workspace = true
 clap = { version = "4", features = ["derive"] }
 tiny_http = "0.12"
 subtle = "2"
-

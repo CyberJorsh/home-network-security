@@ -203,8 +203,29 @@ pub fn parse_nmap(xml: &str) -> Result<Vec<DiscoveredDevice>> {
     let mut vendor = None;
     let mut up = false;
     let mut host = false;
+    let mut depth: usize = 0;
+    let mut root_seen = false;
     loop {
-        match reader.read_event()? {
+        let event = reader.read_event()?;
+        match &event {
+            Event::Start(e) | Event::Empty(e) => {
+                if depth == 0 {
+                    if root_seen || e.name().as_ref() != b"nmaprun" {
+                        bail!("Expected one nmaprun root");
+                    }
+                    root_seen = true;
+                }
+                if matches!(event, Event::Start(_)) {
+                    depth += 1;
+                }
+            }
+            Event::End(_) => {
+                depth = depth.checked_sub(1).context("Unexpected XML close tag")?;
+            }
+            Event::Eof if !root_seen || depth != 0 => bail!("Incomplete Nmap XML"),
+            _ => {}
+        }
+        match event {
             Event::Start(e) if e.name().as_ref() == b"host" => {
                 host = true;
                 ips.clear();
@@ -305,6 +326,8 @@ mod tests {
     fn nmap_preserves_evidence_and_ignores_down_hosts() {
         let xml = r#"<?xml version="1.0"?><!DOCTYPE nmaprun><nmaprun><host><status state="up"/><address addr="10.1.1.2" addrtype="ipv4"/><address addr="02:00:00:00:00:11" addrtype="mac" vendor="Example"/><hostnames><hostname name="speaker.local"/></hostnames></host><host><status state="down"/><address addr="10.1.1.3" addrtype="ipv4"/></host></nmaprun>"#;
         let result = parse_nmap(xml).unwrap();
+        assert!(parse_nmap("<nmaprun><host>").is_err());
+        assert!(parse_nmap("<other/>").is_err());
         assert_eq!(result.len(), 1);
         assert_eq!(result[0].hostname.as_deref(), Some("speaker.local"));
         assert!(
