@@ -211,6 +211,8 @@ pub fn bounded_output_cancellable(
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct DiscoveredDevice {
+    #[serde(default)]
+    pub details: DeviceDetails,
     pub ip: String,
     pub mac: Option<String>,
     pub hostname: Option<String>,
@@ -228,6 +230,10 @@ pub fn parse_nmap(xml: &str) -> Result<Vec<DiscoveredDevice>> {
     let mut hostname = None;
     let mut vendor = None;
     let mut up = false;
+    let mut details = DeviceDetails::default();
+    let mut service: Option<ObservedService> = None;
+    let mut port_open = false;
+    let mut in_cpe = false;
     let mut host = false;
     let mut depth: usize = 0;
     let mut root_seen = false;
@@ -259,8 +265,11 @@ pub fn parse_nmap(xml: &str) -> Result<Vec<DiscoveredDevice>> {
                 hostname = None;
                 vendor = None;
                 up = false;
+                details = DeviceDetails::default();
+                service = None;
+                in_cpe = false;
             }
-            Event::Empty(e) if host => {
+            Event::Start(e) | Event::Empty(e) if host => {
                 let attrs = e
                     .attributes()
                     .map(|a| {
@@ -273,6 +282,40 @@ pub fn parse_nmap(xml: &str) -> Result<Vec<DiscoveredDevice>> {
                     .collect::<Result<std::collections::HashMap<_, _>>>()?;
                 let get = |key: &str| attrs.get(key).map(String::as_str).unwrap_or("");
                 match e.name().as_ref() {
+                    b"cpe" => in_cpe = true,
+                    b"port" => {
+                        port_open = false;
+                        service = get("portid")
+                            .parse::<u16>()
+                            .ok()
+                            .map(|port| ObservedService {
+                                port,
+                                transport: get("protocol").into(),
+                                name: None,
+                                product: None,
+                                version: None,
+                            });
+                    }
+                    b"state" if service.is_some() => port_open = get("state") == "open",
+                    b"service" => {
+                        if let Some(s) = service.as_mut() {
+                            s.name = attrs.get("name").cloned();
+                            s.product = attrs.get("product").cloned();
+                            s.version = attrs.get("version").cloned();
+                        }
+                        if details.operating_system.is_none() {
+                            details.operating_system = attrs
+                                .get("ostype")
+                                .map(|v| format!("Service-reported OS: {v}"));
+                        }
+                    }
+                    b"osmatch" if details.operating_system.is_none() => {
+                        details.operating_system = Some(format!(
+                            "Nmap guess: {} (reported accuracy {}%)",
+                            get("name"),
+                            get("accuracy")
+                        ));
+                    }
                     b"status" => up = get("state") == "up",
                     b"address" => match get("addrtype") {
                         "ipv4" | "ipv6" => {
@@ -290,10 +333,29 @@ pub fn parse_nmap(xml: &str) -> Result<Vec<DiscoveredDevice>> {
                     _ => {}
                 }
             }
+            Event::Text(e) if in_cpe && details.model.is_none() => {
+                let text = e.decode()?;
+                if text.starts_with("cpe:/h:") || text.starts_with("cpe:2.3:h:") {
+                    details.model = Some(format!("Nmap hardware CPE: {text}"));
+                }
+            }
+            Event::End(e) if e.name().as_ref() == b"cpe" => in_cpe = false,
+            Event::End(e) if e.name().as_ref() == b"port" => {
+                if let Some(s) = service.take() {
+                    if port_open && details.services.len() < 128 {
+                        details.services.push(s);
+                    }
+                }
+            }
             Event::End(e) if e.name().as_ref() == b"host" => {
                 if up {
                     for ip in &ips {
                         devices.push(DiscoveredDevice {
+                            details: DeviceDetails {
+                                hostname: hostname.clone(),
+                                vendor: vendor.clone(),
+                                ..details.clone()
+                            },
                             ip: ip.clone(),
                             mac: mac.clone(),
                             hostname: hostname.clone(),
@@ -322,6 +384,13 @@ pub fn discover_cancellable(
     cidr: &str,
     cancel: &std::sync::atomic::AtomicBool,
 ) -> Result<Vec<DiscoveredDevice>> {
+    discover_with_services(cidr, false, cancel)
+}
+pub fn discover_with_services(
+    cidr: &str,
+    services: bool,
+    cancel: &std::sync::atomic::AtomicBool,
+) -> Result<Vec<DiscoveredDevice>> {
     let nets = networks(cidr)?;
     if nets.len() != 1 {
         bail!("Discover one explicitly selected IPv4 network at a time");
@@ -331,13 +400,16 @@ pub fn discover_cancellable(
         _ => bail!("Discovery is limited to private IPv4 networks of /24 or smaller"),
     }
     let mut command = tool_command("nmap");
+    if services {
+        command.args(["-sT", "-sV", "--version-light", "--top-ports", "20"]);
+    } else {
+        command.arg("-sn");
+    }
     command.args([
-        "-sn",
-        "-n",
         "--max-retries",
         "1",
         "--host-timeout",
-        "10s",
+        if services { "30s" } else { "10s" },
         "-oX",
         "-",
         cidr,
@@ -393,6 +465,24 @@ mod tests {
         let started = Instant::now();
         assert!(bounded_output(&mut command, 4, Duration::from_millis(50)).is_err());
         assert!(started.elapsed() < Duration::from_secs(1));
+    }
+    #[test]
+    fn nmap_retains_open_services_and_labels_os_guesses() {
+        let xml = r#"<nmaprun><host><status state="up"/><address addr="10.0.0.2" addrtype="ipv4"/><hostnames><hostname name="fixture.local"/></hostnames><ports><port protocol="tcp" portid="22"><state state="open"/><service name="ssh" product="FixtureSSH" version="1.0"><cpe>cpe:/a:fixture:ssh:1.0</cpe></service></port><port protocol="tcp" portid="80"><state state="closed"/><service name="http"/></port></ports><os><osmatch name="FixtureOS" accuracy="85"/></os></host></nmaprun>"#;
+        let found = parse_nmap(xml).unwrap();
+        assert_eq!(found[0].details.hostname.as_deref(), Some("fixture.local"));
+        assert_eq!(found[0].details.services.len(), 1);
+        assert_eq!(
+            found[0].details.services[0].product.as_deref(),
+            Some("FixtureSSH")
+        );
+        assert!(found[0]
+            .details
+            .operating_system
+            .as_ref()
+            .unwrap()
+            .contains("guess"));
+        assert!(found[0].details.model.is_none());
     }
     #[test]
     fn parses_ipv6_and_preserves_frame_bytes() {

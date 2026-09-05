@@ -4,24 +4,24 @@ Understand the devices on your home network, their internet traffic, and their c
 
 An open-source desktop application for **macOS and Windows**, with a Rust collector that can run on a local computer, Linux VM, or Raspberry Pi. Observations stay on your devices. Discovery, traffic analysis, and evidence-backed alerts do not require AI.
 
-> **v0.1 alpha.** This is an observation tool, not a replacement for a firewall or a proven intrusion-detection system. Collection coverage depends on your hardware and sensor placement. The desktop app supports real ChatGPT/Grok subscription sign-in through their official clients and local discovery/capture controls. AI explanations use an editable, reviewed summary for manual submission; embedded model inference is not enabled.
+> **v0.1 alpha.** This is an observation tool, not a replacement for a firewall or a proven intrusion-detection system. Collection coverage depends on your hardware and sensor placement. The desktop app supports real ChatGPT/Grok subscription sign-in through their official clients and local discovery/capture controls. AI explanations stream inside the app after explicit summary review, using the selected model and reasoning effort.
 
 ![Native Mac app showing synthetic sample observations](docs/sample-overview.png)
 
 ## What you can do
 
 - Explore a clearly labeled synthetic home network without scanning anything.
-- Discover hosts with separately installed Nmap, or import Nmap XML.
+- Discover hosts and optionally check common TCP services with Nmap, or import Nmap XML. Missing tools have guided setup.
 - Import PCAP/PCAPNG through separately installed TShark, or normalized NDJSON.
 - Capture IP traffic from an explicitly chosen interface with a bounded recording duration.
 - Inspect internet uploads, downloads, local transfers, device details, and supporting conversations.
 - Rename observed devices and mark alerts reviewed in local SQLite storage.
 - Connect the desktop app to a collector over loopback or a user-managed SSH tunnel.
-- Prepare a focused summary, redact names and addresses, edit it, and approve the exact text before copying it for ChatGPT or Grok.
+- Review a detailed device summary and send it to ChatGPT or Grok, with model/effort controls and streamed responses.
 
 Open **Collection → Scan from this computer** to detect tools and interfaces, choose a local private subnet, and run device discovery. Choose an interface and duration for packet-metadata capture; the desktop dashboard reads the resulting local observations. Capture permissions and drivers are checked by the actual capture attempt. Discovery and capture do not start when the app launches.
 
-Open **AI explanations** to sign in, check the session, or sign out. Complete the official device-code consent in your browser. See [provider setup](docs/providers.md) for client installation and the distinction between authentication and model inference.
+Open **AI explanations** to sign in, check the session, or sign out. Complete the official device-code consent in your browser. Existing sessions restore automatically. See [provider setup](docs/providers.md) for tested client versions, model selection, usage checks, and reviewed sends.
 
 The app never starts a capture or discovery scan automatically. It does not block devices, change router rules, automatically send network data to AI, request API keys, or fall back to paid API inference.
 
@@ -105,7 +105,7 @@ python3 scripts/smoke_collector.py
 python3 scripts/smoke_pcap.py
 ```
 
-Start with [CONTRIBUTING.md](CONTRIBUTING.md), [architecture](docs/architecture.md), [verification](docs/verification.md), and the [roadmap](docs/roadmap.md). AI is optional; the required provider direction is ChatGPT and Grok subscriptions, not API billing. [Provider integration notes](docs/providers.md) explain the outstanding gates.
+Start with [CONTRIBUTING.md](CONTRIBUTING.md), [architecture](docs/architecture.md), [verification](docs/verification.md), and the [roadmap](docs/roadmap.md). AI is optional; the required provider direction is ChatGPT and Grok subscriptions, not API billing. [Provider integration notes](docs/providers.md) explain containment, allowance checks, and remaining platform gates.
 
 ## License
 

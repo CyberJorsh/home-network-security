@@ -160,6 +160,7 @@ fn discovery_does_not_invent_traffic() {
     s.save_discovery(
         "test",
         &[DiscoveredDevice {
+            details: DeviceDetails::default(),
             ip: "10.0.0.5".into(),
             mac: None,
             hostname: Some("printer.local".into()),
@@ -186,4 +187,52 @@ fn demo_is_synthetic_and_isolated() {
         .sensors
         .iter()
         .all(|s| s.internet_coverage == "unverified" && s.lan_coverage == "unverified"));
+}
+
+#[test]
+fn host_discovery_hints_require_matching_mac_ip_and_domain() {
+    let mut s = Store::memory().unwrap();
+    for id in ["host-discovery", "host-fixture", "remote-fixture"] {
+        s.set_sensor(&Sensor::new(id, "tshark")).unwrap();
+    }
+    let now = chrono::Utc::now().timestamp();
+    s.save_discovery(
+        "host-discovery",
+        &[DiscoveredDevice {
+            ip: "10.0.0.2".into(),
+            mac: Some("02:00:00:00:00:02".into()),
+            hostname: Some("fixture.local".into()),
+            vendor: None,
+            details: DeviceDetails::default(),
+        }],
+    )
+    .unwrap();
+    let mut e = event("matched", "10.0.0.2", "203.0.113.1", 100);
+    e.timestamp = now;
+    e.sensor_id = "host-fixture".into();
+    e.src_mac = Some("02:00:00:00:00:02".into());
+    s.ingest(&[e.clone()]).unwrap();
+    let v = s.snapshot(Some("host-fixture"), "local").unwrap();
+    assert_eq!(v.devices[0].name, "fixture.local");
+    assert_eq!(v.totals.packets, 1);
+    e.sensor_id = "remote-fixture".into();
+    s.ingest(&[e.clone()]).unwrap();
+    assert!(
+        s.snapshot(Some("remote-fixture"), "local").unwrap().devices[0]
+            .details
+            .hostname
+            .is_none()
+    );
+    e.sensor_id = "host-fixture".into();
+    e.id = "same-mac-other-ip".into();
+    e.src_ip = "10.0.0.3".into();
+    s.ingest(&[e]).unwrap();
+    let v = s.snapshot(Some("host-fixture"), "local").unwrap();
+    let other = v
+        .devices
+        .iter()
+        .find(|d| d.addresses.contains(&"10.0.0.3".into()))
+        .unwrap();
+    assert!(other.details.hostname.is_none());
+    assert_eq!(v.totals.packets, 2);
 }

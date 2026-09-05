@@ -10,7 +10,23 @@ export interface Sensor {
   status: string;
   droppedPackets: number | null;
 }
+export interface DeviceDetails {
+  observedAt?: number | null;
+  source?: string | null;
+  hostname: string | null;
+  vendor: string | null;
+  model: string | null;
+  operatingSystem: string | null;
+  services: {
+    port: number;
+    transport: string;
+    name: string | null;
+    product: string | null;
+    version: string | null;
+  }[];
+}
 export interface Device {
+  details?: DeviceDetails;
   id: string;
   name: string;
   addresses: string[];

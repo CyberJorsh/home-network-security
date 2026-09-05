@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { buildSummary, bytes, filterConversations } from './lib';
+import { alertTitle, buildSummary, bytes, filterConversations } from './lib';
 import type { Snapshot } from './types';
 
 const sample: Snapshot = {
@@ -133,6 +133,62 @@ describe('privacy boundary', () => {
     expect(text).not.toContain('02:11:22:33:44:55');
     expect(text).toContain('Other');
     expect(text).toContain('Selected observation');
+  });
+  it('includes reported device evidence and redacts free-form identity when requested', () => {
+    const enriched = structuredClone(sample);
+    enriched.devices[0].details = {
+      hostname: 'private.local',
+      vendor: 'Fixture vendor',
+      model: 'Fixture hardware',
+      operatingSystem: 'Nmap guess: FixtureOS',
+      services: [
+        {
+          port: 22,
+          transport: 'tcp',
+          name: 'ssh',
+          product: 'FixtureSSH',
+          version: '1.0',
+        },
+      ],
+    };
+    const full = buildSummary(enriched, 'secret-id', false);
+    for (const detail of [
+      'private.local',
+      'Fixture hardware',
+      'FixtureOS',
+      'FixtureSSH',
+      '02:11:22:33:44:55',
+      'D1',
+      'S1',
+    ])
+      expect(full).toContain(detail);
+    const hidden = buildSummary(enriched, 'secret-id', true);
+    for (const detail of [
+      'private.local',
+      'Fixture hardware',
+      'FixtureOS',
+      'FixtureSSH',
+      '02:11:22:33:44:55',
+    ])
+      expect(hidden).not.toContain(detail);
+    expect(full).not.toContain('203.0.113.99');
+  });
+  it('labels observation alerts with the current device name', () => {
+    expect(
+      alertTitle(
+        {
+          id: 'a',
+          deviceId: 'secret-id',
+          title: 'Device observed',
+          detail: '',
+          severity: 'info',
+          timestamp: 1,
+          acknowledged: false,
+          evidence: [],
+        },
+        sample.devices,
+      ),
+    ).toBe('Private laptop observed');
   });
   it('requires a selected existing device', () =>
     expect(() => buildSummary(sample, 'missing')).toThrow());

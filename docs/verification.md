@@ -36,3 +36,18 @@ The updated macOS desktop was exercised with real, operator-authorized discovery
 Official Codex 0.153.1 and Grok Build 1.0.18 passed isolated signed-out protocol checks; both issued actual device login challenges from the desktop. Grok browser consent completed and the app read the account through ACP. Authentication and capture permission setup are distinct from model inference. No model prompt was sent.
 
 Added automated checks cover subprocess cancellation, denial of unsolicited auth-client RPC permissions, cancellation without provider output, provider URL restrictions, and API-environment exclusion. The optional installed-client check is ignored in ordinary CI because the clients are external dependencies; run `cargo test -p home-network-security installed_client_protocols -- --ignored --nocapture` explicitly where they are installed.
+
+## Reviewed streaming and guided setup update
+
+On macOS, real subscription calls using Codex 0.153.1 and Grok Build 1.0.18 completed with synthetic text: 82 ChatGPT chunks and 87 Grok chunks in the backend smoke test. Both also completed reviewed sends in the native UI, with restored sessions, compact account controls, actual model/effort selection, and review reset after send. Synthetic adversarial probes for each provider observed no canary disclosure, marker-file modification, local HTTP connection, or tool notification. No real network summary was sent in these developer tests.
+
+Frontend interaction tests cover automatic session checks, hidden sign-in controls, editing an empty summary, exact reviewed sends, effort/provider review reset, streamed rendering, and install prompts from both collection buttons when tools are absent. Rust tests cover quota refusal, missing billing data, paid-credit refusal, protocol cancellation, permission rejection, and open-service/OS evidence parsing. Installation launch is implemented for both desktop targets; physical Windows prompts and fresh-machine macOS Homebrew bootstrap remain unverified. Existing capture tools were preserved on the development Mac.
+
+Opt-in tests use the operator's isolated app provider directory and consume subscription allowance. Ordinary CI does not run them:
+
+```sh
+HNS_TEST_PROVIDER_ROOT=/path/to/app/providers cargo test -p home-network-security real_synthetic_streams -- --ignored --nocapture
+HNS_TEST_PROVIDER_ROOT=/path/to/app/providers cargo test -p home-network-security real_containment_canaries -- --ignored --nocapture
+```
+
+Keep live account metadata, inventories, captures, and private test artifacts out of public reports. A passing synthetic containment probe is not a complete security audit or proof of Windows runtime behavior.

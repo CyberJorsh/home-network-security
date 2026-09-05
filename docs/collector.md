@@ -25,7 +25,7 @@ tshark -D
 ./target/release/hns-collector --sensor mirror snapshot
 ```
 
-Discovery sends host-detection probes; it does not run port scans, exploit checks, or vulnerability scripts. Only select a network you are authorized to inspect. There is no scan-on-launch behavior. The GUI can import Nmap XML but does not yet launch active discovery or capture itself.
+CLI discovery sends host-detection probes. The desktop additionally offers an explicit checkbox to inspect the top 20 TCP ports with a connect scan and light service detection; it does not run exploit or vulnerability scripts. Only select a network you are authorized to inspect. There is no scan-on-launch behavior. The GUI also imports Nmap XML and launches explicit local discovery/capture jobs.
 
 `capture` runs TShark with name resolution disabled, only emitting selected fields. No payload file is created by this application. It stops after the selected duration (1 second–24 hours), with a deadline and bounded queue. Exit diagnostics matter; packet loss is unknown. Sudden termination may leave the stored status as collecting; the GUI labels missing recent observations and does not call that a healthy sensor.
 
@@ -74,3 +74,11 @@ Discovery and each capture interface get separate observation sources. Starting 
 On macOS, `brew install nmap wireshark` installs the CLI tools. Wireshark's signed ChmodBPF installer enables BPF access for members of `access_bpf`; Homebrew also exposes it as `brew install --cask wireshark-chmodbpf`. Administrator authorization is required. Restart the app after installation; depending on your environment, logging out or rebooting may be needed for group membership. On Windows install the Npcap driver with the appropriate license and permissions. Interface enumeration alone does not establish that a capture will succeed.
 
 Unprivileged discovery can miss devices that do not respond to its probes. Host capture typically sees the computer's own traffic plus broadcasts and multicast, not all conversations between other devices. Coverage remains unverified and packet drops are shown as unknown. Add your actual globally routed local IPv6 prefix in **Your local networks** for correct direction classification.
+
+## Guided dependency setup
+
+Click **Discover devices** or **Start capture** when the required tool is absent to open a native confirmation showing the installation command. The app then opens an interactive terminal. Complete package-manager, installer, license, and administrator prompts yourself, then click **Continue after installation** and start collection. Installation does not itself start a scan/capture. Manual **Install tools and enable capture** instructions remain available; a failed capture also offers permission setup.
+
+macOS installs Nmap/Wireshark CLI with Homebrew (offering official Homebrew bootstrap when absent) and the official ChmodBPF package when requested. Windows Nmap setup downloads the official 7.991 installer and verifies its pinned SHA-256 before launch; the winget Nmap entry was outdated at implementation time. Windows Wireshark uses its exact winget package ID and interactive setup; select TShark and Npcap. External software is not redistributed. Physical Windows installer prompts remain unverified.
+
+The optional collector connection is collapsed by default. Nmap hostnames, vendor, open-service product/version, and OS guesses are retained as evidence; unknown model/OS information stays unknown. Renamed or reported device names appear in observed-device alerts.

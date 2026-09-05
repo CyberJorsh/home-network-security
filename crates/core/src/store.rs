@@ -218,14 +218,40 @@ impl Store {
             Ok((r.get::<_, i64>(0)?, r.get::<_, String>(1)?))
         })? {
             let (ts, body) = row?;
-            let found: DiscoveredDevice = serde_json::from_str(&body)?;
+            let mut found: DiscoveredDevice = serde_json::from_str(&body)?;
+            found.details.hostname = found.details.hostname.or(found.hostname.clone());
+            found.details.vendor = found.details.vendor.or(found.vendor.clone());
+            found.details.observed_at = Some(ts);
+            found.details.source = Some("Nmap discovery".into());
             let id = device_id(selected.as_deref().unwrap_or(""), &found.ip, &found.mac);
             let name = names
                 .get(&id)
                 .cloned()
                 .or_else(|| found.hostname.clone())
                 .unwrap_or(found.ip.clone());
-            devices.insert(id.clone(),Device {id,name,addresses:vec![found.ip],mac:found.mac,category:"Unknown".into(),identification:format!("Nmap discovery; reported vendor: {}. Hostnames and vendors are hints, not verified identity.",found.vendor.unwrap_or("unknown".into())),first_seen:ts,last_seen:ts,upload:0,download:0,local_bytes:0,connections:0});
+            devices.insert(id.clone(),Device {details: found.details, id,name,addresses:vec![found.ip],mac:found.mac,category:"Unknown".into(),identification:format!("Nmap discovery; reported vendor: {}. Hostnames and vendors are hints, not verified identity.",found.vendor.unwrap_or("unknown".into())),first_seen:ts,last_seen:ts,upload:0,download:0,local_bytes:0,connections:0});
+        }
+        // Correlate native host discovery with native host capture only on BOTH MAC and IP.
+        // This enriches identity hints without combining traffic totals or collector domains.
+        let mut host_hints = std::collections::HashMap::new();
+        if selected
+            .as_deref()
+            .is_some_and(|id| id.starts_with("host-") && id != "host-discovery")
+        {
+            let mut stmt = self.conn.prepare(
+                "SELECT ts,body FROM discovery WHERE sensor='host-discovery' LIMIT 4096",
+            )?;
+            for row in stmt.query_map([], |r| Ok((r.get::<_, i64>(0)?, r.get::<_, String>(1)?)))? {
+                let (ts, body) = row?;
+                let mut found: DiscoveredDevice = serde_json::from_str(&body)?;
+                found.details.hostname = found.details.hostname.or(found.hostname.clone());
+                found.details.vendor = found.details.vendor.or(found.vendor.clone());
+                found.details.observed_at = Some(ts);
+                found.details.source = Some("Local Nmap discovery; matched MAC and IP".into());
+                if let Some(mac) = &found.mac {
+                    host_hints.insert((found.ip.clone(), mac.to_lowercase()), (ts, found));
+                }
+            }
         }
         let mut conversations: BTreeMap<String, Conversation> = BTreeMap::new();
         let mut timeline: BTreeMap<i64, Bucket> = BTreeMap::new();
@@ -251,6 +277,7 @@ impl Store {
             ] {
                 if let Some(id) = id {
                     let d = devices.entry(id.clone()).or_insert_with(|| Device {
+                        details: DeviceDetails::default(),
                         id: id.clone(),
                         name: names.get(id).cloned().unwrap_or_else(|| ip.clone()),
                         addresses: vec![],
@@ -337,6 +364,27 @@ impl Store {
                     d.connections += 1;
                 }
             }
+        }
+        for d in devices.values_mut() {
+            let Some(mac) = &d.mac else { continue };
+            let Some((ts, found)) = d
+                .addresses
+                .iter()
+                .find_map(|ip| host_hints.get(&(ip.clone(), mac.to_lowercase())))
+            else {
+                continue;
+            };
+            if d.last_seen.abs_diff(*ts) > 86400 {
+                continue;
+            }
+            d.details = found.details.clone();
+            if !names.contains_key(&d.id) {
+                let discovery_id = device_id("host-discovery", &found.ip, &found.mac);
+                if let Some(name) = names.get(&discovery_id).or(found.hostname.as_ref()) {
+                    d.name = name.clone();
+                }
+            }
+            d.identification = "Observed traffic with local discovery hints matched by MAC and IP. Identity is not verified.".into();
         }
         let mut alerts = Vec::new();
         for d in devices.values() {

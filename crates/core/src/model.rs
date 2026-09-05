@@ -105,9 +105,33 @@ impl Sensor {
     }
 }
 
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DeviceDetails {
+    pub observed_at: Option<i64>,
+    pub source: Option<String>,
+    pub hostname: Option<String>,
+    pub vendor: Option<String>,
+    pub model: Option<String>,
+    pub operating_system: Option<String>,
+    #[serde(default)]
+    pub services: Vec<ObservedService>,
+}
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ObservedService {
+    pub port: u16,
+    pub transport: String,
+    pub name: Option<String>,
+    pub product: Option<String>,
+    pub version: Option<String>,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Device {
+    #[serde(default)]
+    pub details: DeviceDetails,
     pub id: String,
     pub name: String,
     pub addresses: Vec<String>,

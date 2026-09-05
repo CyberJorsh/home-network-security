@@ -1,21 +1,20 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import {
   Activity,
+  Check,
+  LockKeyhole,
+  ExternalLink,
   ArrowDownLeft,
   ArrowLeftRight,
   ArrowRight,
   ArrowUpRight,
   Bell,
   Camera,
-  Check,
   ChevronRight,
-  Copy,
-  ExternalLink,
   FileUp,
   HardDrive,
   Laptop,
   LayoutDashboard,
-  LockKeyhole,
   Monitor,
   Network,
   Plus,
@@ -28,12 +27,12 @@ import {
   Speaker,
   X,
 } from 'lucide-react';
-import type { Alert, Page, Provider, Snapshot } from './types';
+import type { Alert, Page, Snapshot } from './types';
 import { acknowledge, command, native, readSnapshot, rename } from './api';
-import { buildSummary, bytes, date, filterConversations } from './lib';
+import { alertTitle, bytes, date, filterConversations } from './lib';
 import Chart from './components/Chart';
 import HostCollection from './components/HostCollection';
-import ProviderAuth from './components/ProviderAuth';
+import Assistant from './components/Assistant';
 import TrafficTable from './components/TrafficTable';
 
 const navigation = [
@@ -491,7 +490,7 @@ export default function App() {
                         .map((a) => (
                           <div className="attention" key={a.id}>
                             <span className="pill amber-pill">Observation</span>
-                            <h3>{a.title}</h3>
+                            <h3>{alertTitle(a, snapshot.devices)}</h3>
                             <p>
                               {
                                 snapshot.devices.find(
@@ -671,7 +670,7 @@ export default function App() {
                       </span>
                       <div className="alert-content">
                         <div className="alert-title">
-                          <h3>{a.title}</h3>
+                          <h3>{alertTitle(a, snapshot.devices)}</h3>
                           <span className="pill">
                             {a.acknowledged
                               ? 'Reviewed'
@@ -876,6 +875,27 @@ export default function App() {
               <dd className="mono">{selectedDevice.addresses.join(', ')}</dd>
               <dt>Observed MAC</dt>
               <dd className="mono">{selectedDevice.mac ?? 'Not available'}</dd>
+              <dt>Reported hostname</dt>
+              <dd>{selectedDevice.details?.hostname || 'Not observed'}</dd>
+              <dt>Reported vendor</dt>
+              <dd>{selectedDevice.details?.vendor || 'Not observed'}</dd>
+              <dt>Model</dt>
+              <dd>{selectedDevice.details?.model || 'Not observed'}</dd>
+              <dt>Operating system</dt>
+              <dd>
+                {selectedDevice.details?.operatingSystem || 'Not observed'}
+              </dd>
+              <dt>Discovered services</dt>
+              <dd>
+                {selectedDevice.details?.services.length
+                  ? selectedDevice.details.services
+                      .map(
+                        (s) =>
+                          `${s.port}/${s.transport} ${s.name || ''} ${s.product || ''} ${s.version || ''}`,
+                      )
+                      .join(', ')
+                  : 'Not observed'}
+              </dd>
               <dt>First in retained observations</dt>
               <dd>{date(selectedDevice.firstSeen)}</dd>
               <dt>Last observed</dt>
@@ -1015,11 +1035,10 @@ function Collection({
   return (
     <div className="collection-grid">
       <HostCollection onLocal={onLocal} />
-      <section className="panel setup-panel">
-        <span className="setup-icon">
-          <Radio size={25} />
-        </span>
-        <h2>Connect your collector</h2>
+      <details className="panel setup-panel collector-details">
+        <summary>
+          Connect a collector <span className="muted">Optional</span>
+        </summary>
         <p>
           Read observations from this computer, or an always-on collector
           through an SSH tunnel. The connection token stays in memory.
@@ -1074,7 +1093,7 @@ function Collection({
             permissions and sensor placement.
           </p>
         </details>
-      </section>
+      </details>
       <div className="stack">
         <section className="panel setup-panel">
           <div className="panel-heading compact">
@@ -1175,209 +1194,6 @@ function Collection({
           </form>
         </section>
       </div>
-    </div>
-  );
-}
-
-function Assistant({
-  snapshot,
-  initialDevice,
-  alert,
-  onNotice,
-  onError,
-}: {
-  snapshot: Snapshot;
-  initialDevice: string;
-  alert?: Alert;
-  onNotice: (s: string) => void;
-  onError: (s: string) => void;
-}) {
-  const [provider, setProvider] = useState<Provider>('chatgpt');
-  const [deviceId, setDeviceId] = useState(
-    initialDevice || snapshot.devices[0]?.id || '',
-  );
-  const [redact, setRedact] = useState(true);
-  const [summary, setSummary] = useState('');
-  const [reviewed, setReviewed] = useState(false);
-  const prepare = () => {
-    try {
-      setSummary(
-        buildSummary(
-          snapshot,
-          deviceId,
-          redact,
-          alert?.deviceId === deviceId ? alert : undefined,
-        ),
-      );
-      setReviewed(false);
-    } catch (e) {
-      onError(String(e));
-    }
-  };
-  const copy = async () => {
-    try {
-      await navigator.clipboard.writeText(summary);
-      onNotice('Reviewed summary copied. Nothing has been sent.');
-    } catch {
-      onError('Clipboard access failed. Select and copy the summary manually.');
-    }
-  };
-  return (
-    <div className="assistant-grid">
-      <section className="panel setup-panel">
-        <span className="setup-icon">
-          <Sparkles size={25} />
-        </span>
-        <h2>Your subscription. Your choice.</h2>
-        <p>
-          Choose the account you already use. Core discovery, traffic views, and
-          alerts work without AI.
-        </p>
-        <div className="provider-options">
-          {(['chatgpt', 'grok'] as const).map((p) => (
-            <button
-              className={`provider ${provider === p ? 'chosen' : ''}`}
-              key={p}
-              onClick={() => {
-                setProvider(p);
-                setReviewed(false);
-              }}
-              aria-pressed={provider === p}
-            >
-              <span className="provider-logo">
-                {p === 'chatgpt' ? <Sparkles size={21} /> : '𝕏'}
-              </span>
-              <span>
-                {p === 'chatgpt' ? 'ChatGPT' : 'Grok'}
-                <small>Use your existing subscription</small>
-              </span>
-              {provider === p && <Check size={17} />}
-            </button>
-          ))}
-        </div>
-        <ProviderAuth key={provider} provider={provider} />
-        <p className="hint">
-          You can test real sign-in here. Explanations still use the reviewed
-          copy-and-paste workflow below; embedded model requests remain disabled
-          while tool containment and credit controls are verified.
-        </p>
-        <label htmlFor="summary-device">Device to explain</label>
-        <select
-          id="summary-device"
-          value={deviceId}
-          onChange={(e) => {
-            setDeviceId(e.target.value);
-            setSummary('');
-            setReviewed(false);
-          }}
-        >
-          {snapshot.devices.map((d) => (
-            <option value={d.id} key={d.id}>
-              {d.name}
-            </option>
-          ))}
-        </select>
-        <label className="checkbox-label">
-          <input
-            type="checkbox"
-            checked={redact}
-            onChange={(e) => {
-              setRedact(e.target.checked);
-              setSummary('');
-              setReviewed(false);
-            }}
-          />
-          <span>Replace names and IP addresses with aliases</span>
-        </label>
-        <button
-          className="button primary full"
-          disabled={!deviceId}
-          onClick={prepare}
-        >
-          Prepare summary <ArrowRight size={15} />
-        </button>
-        <p className="hint">
-          At most 12 relevant connections. No packet payloads, MAC addresses,
-          unrelated devices, or raw captures.
-        </p>
-      </section>
-      <section className="panel summary-panel">
-        <div className="panel-heading">
-          <div>
-            <h2>Review before sharing</h2>
-            <p>You control every word that leaves this app.</p>
-          </div>
-          <LockKeyhole size={18} />
-        </div>
-        {summary ? (
-          <>
-            <label className="sr-only" htmlFor="summary">
-              Editable summary
-            </label>
-            <textarea
-              id="summary"
-              className="summary-editor"
-              spellCheck={false}
-              value={summary}
-              onChange={(e) => {
-                setSummary(e.target.value);
-                setReviewed(false);
-              }}
-            />
-            <div className="summary-actions">
-              <label className="checkbox-label">
-                <input
-                  type="checkbox"
-                  checked={reviewed}
-                  onChange={(e) => setReviewed(e.target.checked)}
-                />
-                <span>I reviewed this exact summary.</span>
-              </label>
-              <div className="button-row">
-                <button
-                  className="button primary"
-                  disabled={!reviewed || !summary.trim()}
-                  onClick={() => void copy()}
-                >
-                  <Copy size={15} />
-                  Copy reviewed summary
-                </button>
-                <button
-                  className="button secondary"
-                  disabled={!reviewed}
-                  onClick={() => {
-                    if (native) {
-                      void command('open_provider', { provider }).catch((e) =>
-                        onError(String(e)),
-                      );
-                    } else {
-                      window.open(
-                        provider === 'chatgpt'
-                          ? 'https://chatgpt.com/'
-                          : 'https://grok.com/',
-                        '_blank',
-                        'noopener,noreferrer',
-                      );
-                    }
-                  }}
-                >
-                  <ExternalLink size={15} />
-                  Open {provider === 'chatgpt' ? 'ChatGPT' : 'Grok'}
-                </button>
-              </div>
-              <small>
-                Opening the provider does not send the summary. Paste it there
-                when ready. Provider data and allowance policies apply.
-              </small>
-            </div>
-          </>
-        ) : (
-          <Empty
-            title="A focused explanation starts here"
-            text="Select a device and prepare a summary. Review or remove any details before sharing them."
-          />
-        )}
-      </section>
     </div>
   );
 }

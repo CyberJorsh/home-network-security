@@ -1559,3 +1559,74 @@ main {
     grid-template-columns: 1fr;
   }
 }
+
+.provider-switch {
+  display: flex;
+  gap: 8px;
+  margin: 16px 0;
+}
+.provider-auth.connected {
+  border-bottom: 1px solid var(--border);
+  padding: 4px 0 16px;
+  margin-bottom: 16px;
+  font-size: 13px;
+}
+.provider-auth summary {
+  cursor: pointer;
+}
+.provider-auth summary .muted {
+  display: block;
+  font-size: 11px;
+  margin-top: 4px;
+}
+.model-controls select {
+  width: 100%;
+}
+.model-controls label {
+  display: block;
+  margin: 16px 0 8px;
+  font-weight: 600;
+  font-size: 13px;
+}
+.collector-details {
+  align-self: start;
+}
+.collector-details > summary {
+  cursor: pointer;
+  font-size: 16px;
+  font-weight: 600;
+}
+.collector-details > summary .muted {
+  font-size: 12px;
+  font-weight: 400;
+  margin-left: 8px;
+}
+.explanation-content {
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+  min-width: 0;
+}
+.response-panel {
+  padding: 24px;
+}
+.response-text {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  line-height: 1.7;
+  font-size: 14px;
+}
+.explanation-content .summary-editor {
+  min-height: 340px;
+}
+.model-controls .hint {
+  margin-top: 8px;
+}
+
+.submitted-summary {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  max-height: 240px;
+  overflow-y: auto;
+  font-size: 12px;
+}

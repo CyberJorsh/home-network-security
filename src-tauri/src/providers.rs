@@ -1,4 +1,4 @@
-//! Authentication only: no model session, prompt, tool, or network summary is sent.
+//! Official subscription clients. Credentials remain outside the renderer.
 use anyhow::{bail, Context, Result};
 use serde::Serialize;
 use serde_json::{json, Value};
@@ -29,7 +29,7 @@ struct Slot {
     cancel: Arc<AtomicBool>,
 }
 pub struct Providers {
-    root: PathBuf,
+    pub(crate) root: PathBuf,
     slots: [Slot; 2],
 }
 fn index(provider: &str) -> Result<usize> {
@@ -135,7 +135,7 @@ fn executable(provider: &str) -> Result<PathBuf> {
     }
     bail!("Install the official {name} client and restart the desktop app. See the provider setup guide.")
 }
-fn provider_command(root: &Path, provider: &str) -> Result<Command> {
+pub(crate) fn provider_command(root: &Path, provider: &str) -> Result<Command> {
     index(provider)?;
     private_dir(root)?;
     let profile = root.join(provider);
@@ -161,6 +161,11 @@ fn provider_command(root: &Path, provider: &str) -> Result<Command> {
         )
         .env("NO_COLOR", "1")
         .env("TERM", "dumb")
+        .env("GROK_TELEMETRY_ENABLED", "false")
+        .env(
+            "GROK_CONFIG",
+            r#"{"memory":{"enabled":false},"cli":{"auto_update":false}}"#,
+        )
         .current_dir(workspace)
         .stdin(Stdio::null());
     #[cfg(windows)]
@@ -204,13 +209,13 @@ impl Drop for Process {
         let _ = self.0.wait();
     }
 }
-struct Rpc {
+pub(crate) struct Rpc {
     child: Process,
     rx: mpsc::Receiver<String>,
     next_id: u32,
 }
 impl Rpc {
-    fn start(mut command: Command) -> Result<Self> {
+    pub(crate) fn start(mut command: Command) -> Result<Self> {
         let mut child = command
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
@@ -219,8 +224,8 @@ impl Rpc {
         let out = child.stdout.take().context("Missing client stdout")?;
         let (tx, rx) = mpsc::sync_channel(64);
         std::thread::spawn(move || {
-            // Authentication exchanges have no reason to produce unbounded output.
-            for line in BufReader::new(out.take(2 * 1024 * 1024)).lines() {
+            // Bound all protocol output, including model streams.
+            for line in BufReader::new(out.take(8 * 1024 * 1024)).lines() {
                 let Ok(line) = line else {
                     break;
                 };
@@ -235,43 +240,57 @@ impl Rpc {
             next_id: 0,
         })
     }
-    fn call(&mut self, method: &str, params: Value, cancel: &AtomicBool) -> Result<Value> {
+    pub(crate) fn send(&mut self, method: &str, params: Value) -> Result<u32> {
         self.next_id += 1;
-        let id = self.next_id;
         writeln!(
             self.child.0.stdin.as_mut().context("Client closed stdin")?,
             "{}",
-            json!({"jsonrpc":"2.0","id":id,"method":method,"params":params})
+            json!({"jsonrpc":"2.0","id":self.next_id,"method":method,"params":params})
         )?;
-        let deadline = Instant::now() + Duration::from_secs(30);
+        Ok(self.next_id)
+    }
+    pub(crate) fn receive(&mut self, cancel: &AtomicBool, deadline: Instant) -> Result<Value> {
         loop {
             if cancel.load(Ordering::Relaxed) {
                 bail!("Cancelled");
             }
             if Instant::now() >= deadline {
-                bail!("Provider authentication check timed out");
+                bail!("Provider request timed out");
             }
             match self.rx.recv_timeout(Duration::from_millis(100)) {
                 Ok(line) => {
                     let value: Value =
                         serde_json::from_str(&line).context("Unsupported provider protocol")?;
-                    if value["id"] == id && value.get("method").is_none() {
-                        if value.get("error").is_some() {
-                            bail!("Provider rejected authentication. Sign in again.");
-                        }
-                        return Ok(value["result"].clone());
-                    }
                     if value.get("method").is_some() && value.get("id").is_some() {
-                        // Authentication never grants file, terminal, tool, or permission requests.
                         writeln!(
                             self.child.0.stdin.as_mut().context("Client closed stdin")?,
                             "{}",
-                            json!({"jsonrpc":"2.0","id":value["id"],"error":{"code":-32601,"message":"Authentication-only client"}})
+                            json!({"jsonrpc":"2.0","id":value["id"],"error":{"code":-32601,"message":"This client grants no tool capabilities"}})
                         )?;
+                        bail!("Provider requested an unsupported tool. Request stopped.");
                     }
+                    return Ok(value);
                 }
                 Err(mpsc::RecvTimeoutError::Timeout) => {}
-                Err(_) => bail!("Provider client exited during authentication check"),
+                Err(_) => bail!("Provider client exited before completion"),
+            }
+        }
+    }
+    pub(crate) fn call(
+        &mut self,
+        method: &str,
+        params: Value,
+        cancel: &AtomicBool,
+    ) -> Result<Value> {
+        let id = self.send(method, params)?;
+        let deadline = Instant::now() + Duration::from_secs(30);
+        loop {
+            let value = self.receive(cancel, deadline)?;
+            if value["id"] == id && value.get("method").is_none() {
+                if value.get("error").is_some() {
+                    bail!("Provider rejected {method}. Check your session and supported client version.");
+                }
+                return Ok(value["result"].clone());
             }
         }
     }
@@ -471,6 +490,26 @@ impl Providers {
             slot.cancel.store(true, Ordering::Relaxed);
         }
     }
+    pub(crate) fn reserve(&self, provider: &str) -> Result<Arc<Mutex<AuthStatus>>> {
+        let shared = self.slots[index(provider)?].status.clone();
+        {
+            let mut status = shared.lock().map_err(|e| anyhow::anyhow!(e.to_string()))?;
+            if status.busy {
+                bail!("Wait for the current provider operation to finish");
+            }
+            if !status.signed_in {
+                bail!("Sign in to your provider first");
+            }
+            status.busy = true;
+            self.slots[index(provider)?]
+                .cancel
+                .store(false, Ordering::Relaxed);
+        }
+        Ok(shared)
+    }
+    pub(crate) fn cancellation(&self, provider: &str) -> Result<Arc<AtomicBool>> {
+        Ok(self.slots[index(provider)?].cancel.clone())
+    }
     pub fn action(&self, provider: String, action: String) -> Result<()> {
         let slot = &self.slots[index(&provider)?];
         if action == "cancel" {
@@ -487,10 +526,15 @@ impl Providers {
         if status.busy {
             bail!("An authentication operation is already running");
         }
+        let previous = if action == "check" {
+            status.clone()
+        } else {
+            AuthStatus::default()
+        };
         *status = AuthStatus {
             busy: true,
             message: "Contacting the official provider client…\n".into(),
-            ..AuthStatus::default()
+            ..previous
         };
         slot.cancel.store(false, Ordering::Relaxed);
         let (root, shared, cancel) = (self.root.clone(), slot.status.clone(), slot.cancel.clone());
@@ -603,7 +647,7 @@ mod tests {
     }
     #[test]
     #[cfg(unix)]
-    fn rpc_denies_unsolicited_permissions_before_returning_result() {
+    fn rpc_denies_unsolicited_permissions_and_stops() {
         let mut fake = Command::new("python3");
         fake.args(["-c", r#"import json,sys
 request=json.loads(input())
@@ -613,10 +657,8 @@ assert reply['id']==99 and reply['error']['code']==-32601
 print(json.dumps({'jsonrpc':'2.0','id':request['id'],'result':{'denied':True}}),flush=True)
 "#]);
         let mut rpc = Rpc::start(fake).unwrap();
-        let result = rpc
-            .call("initialize", json!({}), &AtomicBool::new(false))
-            .unwrap();
-        assert_eq!(result["denied"], true);
+        let result = rpc.call("initialize", json!({}), &AtomicBool::new(false));
+        assert!(result.unwrap_err().to_string().contains("unsupported tool"));
     }
     #[test]
     #[cfg(unix)]

@@ -1,5 +1,7 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 mod collection;
+mod explanations;
+mod installers;
 mod providers;
 use hns_core::*;
 use serde::{Deserialize, Serialize};
@@ -15,6 +17,7 @@ struct AppState {
     remote: Mutex<Option<Remote>>,
     collection: collection::Collection,
     providers: providers::Providers,
+    explanations: explanations::Explanations,
 }
 #[derive(Clone, Deserialize)]
 struct Remote {
@@ -330,8 +333,11 @@ fn start_collection(
     kind: String,
     target: String,
     seconds: u64,
+    services: Option<bool>,
 ) -> CmdResult<String> {
-    let id = state.collection.start(&kind, target, seconds)?;
+    let id = state
+        .collection
+        .start(&kind, target, seconds, services.unwrap_or(false))?;
     *state.remote.lock().map_err(error)? = None;
     Ok(id)
 }
@@ -366,6 +372,43 @@ async fn open_login(state: State<'_, Arc<AppState>>, provider: String) -> CmdRes
         .map_err(error)?
 }
 
+#[tauri::command]
+async fn install_collection_tool(tool: String) -> CmdResult<bool> {
+    tauri::async_runtime::spawn_blocking(move || installers::install(&tool).map_err(error))
+        .await
+        .map_err(error)?
+}
+#[tauri::command]
+async fn provider_models(
+    state: State<'_, Arc<AppState>>,
+    provider: String,
+) -> CmdResult<explanations::Catalog> {
+    let state = state.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        explanations::catalog(&state.providers, &provider).map_err(error)
+    })
+    .await
+    .map_err(error)?
+}
+#[tauri::command]
+fn send_explanation(
+    state: State<'_, Arc<AppState>>,
+    request: explanations::Request,
+) -> CmdResult<()> {
+    state
+        .explanations
+        .start(&state.providers, request)
+        .map_err(error)
+}
+#[tauri::command]
+fn explanation_status(state: State<'_, Arc<AppState>>) -> CmdResult<explanations::Output> {
+    Ok(state.explanations.output.lock().map_err(error)?.clone())
+}
+#[tauri::command]
+fn stop_explanation(state: State<'_, Arc<AppState>>) {
+    state.explanations.stop();
+}
+
 fn main() {
     tauri::Builder::default()
         .setup(|app| {
@@ -377,6 +420,7 @@ fn main() {
                 remote: Mutex::new(None),
                 collection: collection::Collection::new(path),
                 providers: providers::Providers::new(root.join("providers")),
+                explanations: explanations::Explanations::new(),
             }));
             Ok(())
         })
@@ -386,10 +430,16 @@ fn main() {
                 state.collection.stop();
                 state.providers.cancel_all();
                 state.collection.shutdown();
+                state.explanations.shutdown();
                 state.providers.shutdown();
             }
         })
         .invoke_handler(tauri::generate_handler![
+            install_collection_tool,
+            provider_models,
+            send_explanation,
+            explanation_status,
+            stop_explanation,
             snapshot,
             rename_device,
             acknowledge_alert,

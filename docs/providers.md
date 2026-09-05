@@ -1,41 +1,45 @@
-# Subscription authentication and AI integration
+# Subscription explanations
 
-The required providers are **ChatGPT and Grok**, using supported subscription authentication. API keys and paid API fallback do not satisfy that requirement. Core collection and alerts must continue to work without either account.
+The desktop app uses **ChatGPT through Codex 0.153.1** and **Grok through Grok Build 1.0.18**. Install the [official Codex CLI](https://developers.openai.com/codex/cli/) or [official Grok Build CLI](https://docs.x.ai/build/cli), then restart the app. These exact client versions are currently required for embedded inference because their protocol and tool restrictions were tested. New versions need validation before widening support. Clients are installed separately, not redistributed.
 
-## Real desktop sign-in
+## Sign in and send
 
-In **AI explanations**, choose ChatGPT or Grok and click **Sign in**. The app starts the installed official client with device authorization, displays its one-time code, and offers the provider's sign-in page. Finish consent in your browser. **Check session** reads the client's actual authentication state; **Sign out** clears this app's profile. Cancelling terminates the local login process; a previously issued device code can remain valid until the provider expires it.
+1. In **AI explanations**, choose ChatGPT or Grok. Complete the official device-code browser consent when signing in. Existing app sessions are checked automatically; connected accounts collapse into **Account settings** with check/sign-out controls.
+2. Choose a model and reasoning effort from the account's live catalog. Higher effort may take longer and use more allowance. ChatGPT uses Codex subscription allowances, which differ from ordinary ChatGPT conversation limits.
+3. Select a device and **Prepare summary**. It includes names, addresses, MAC, reported hostname/vendor, available model/OS hints, discovered services, observation times, totals, and at most twelve relevant conversations. Unobserved details are labeled. Optional privacy mode aliases addresses and omits identifying free-form fields. No capture payloads or unrelated devices are included.
+4. Edit the text, check **I reviewed this exact summary**, and **Send to ChatGPT/Grok**. Only this frozen text plus fixed explanation instructions is submitted. Editing, preparing, changing provider/model/effort, or sending resets review. Empty summaries cannot be sent.
+5. Read the response as it streams inside the app. **Stop** cancels the local request. A stopped/failed response is labeled incomplete; retries require a new reviewed click. There is no automatic retry, provider switch, API-key fallback, or automatic sharing.
 
-Install the [official Codex CLI](https://developers.openai.com/codex/cli/) for ChatGPT and [Grok Build CLI](https://docs.x.ai/build/cli) for Grok. Protocol checks have been exercised with Codex **0.153.1** and Grok Build **1.0.18** on macOS. Clients are installed separately, not redistributed by this project. The desktop app resolves normal package-manager locations and npm's native Codex executable; it does not execute shell command strings. Windows installations should use an official native executable or the standard npm Codex installation. Restart after installing clients.
+Core collection and alerts work without either account. The browser preview is synthetic and cannot authenticate, collect, or send.
 
-Each provider receives an isolated profile under the app's local data directory, in `providers/chatgpt` or `providers/grok`, and an empty working directory. Existing CLI accounts are not imported or modified. Only an allowlist of OS environment variables reaches a client. ChatGPT forces ChatGPT login with file credentials inside that profile; Grok disables API-key authentication and pins session authentication. Profile directories are private to the current user on Unix and live inside the user's application-data directory on Windows. Credentials never enter the webview. Login instructions are held in memory, not copied to repository files.
+## Authentication and billing boundaries
 
-Account checks use Codex `initialize` and `account/read`, or Grok ACP `initialize` and `authenticate` with `cached_token`. They do **not** create model sessions or send prompts. These checks establish available client authentication, not remaining quota, subscription eligibility for every model, or successful inference. Expired or rejected sessions require signing in again. Requests have bounded output, deadlines, and process cleanup; unrequested RPC capabilities are rejected.
+Provider credentials remain in isolated app-owned profiles under the OS application-data directory. The webview never receives access/refresh tokens. Ambient API credentials, client overrides, and agent context are excluded from child environments. ChatGPT login is forced to ChatGPT; Grok API-key authentication is disabled and authentication uses its cached subscription token.
 
-The browser preview remains synthetic and cannot perform native authentication or collection.
+Each send checks authentication, model/effort validity, and live usage before creating a prompt. ChatGPT requires available primary/secondary allowance and no purchased or unlimited-credit balance. Grok requires unified subscription billing, remaining included usage, zero prepaid balance, and zero on-demand cap. Unknown, exhausted, or paid-fallback configurations stop before submission with an explanation. The app never purchases/redeems credits or changes provider billing settings. Accounts with paid credits enabled must resolve that in the provider's own settings to use this strict subscription-only path.
 
-## Explanations still require manual submission
+Account and catalog reads send no model prompt. Usage inspection is a preflight snapshot, not a reservation of allowance against other concurrent account activity. Provider limits and policies still apply.
 
-The app prepares at most twelve relevant conversations, aliases names and addresses by default, omits MACs and capture payloads, freezes the prepared text, and requires review of the exact text. Editing or switching the provider resets review. With aliases enabled, unknown free-form protocol labels and alert text are omitted. Copy the reviewed summary and paste it into the provider's own app when ready. Opening a provider homepage does not submit the text.
+## Model containment and retention
 
-**Real subscription sign-in is implemented; embedded model inference remains gated below.** Authentication alone does not establish summary-only tool containment or prevent purchased-credit consumption. No model call, API key fallback, browser-cookie import, or automatic network-data upload is implemented.
+Requests run in a private disposable profile and empty directory, with only the app's provider credential file copied in. Refreshed credentials are copied back while an account-operation lease prevents overlapping login/logout. Other app histories, real inventories, home files, and workspace instructions are not supplied.
+
+Codex uses its supported custom model catalog with patch and experimental tools removed. Shell, filesystem helpers, web/search, apps/plugins, subagents, memory, image/computer/browser tools, and workspace/environment instruction discovery are disabled. Sessions are ephemeral, read-only, approval-never, and use the default service tier.
+
+Grok uses an explicit curated agent profile with default-tool injection, skills, AGENTS files, MCP inheritance, and memory disabled. Grok rejects an empty curated toolset, so the sole registered tool is its session-local in-memory TODO operation. It has no filesystem, command, network, memory, or subagent access. Before prompting, the app verifies the selected profile name and a tool-definition count of one. Any tool notification or client capability request stops the explanation. The prompt uses ACP's verbatim flag.
+
+Protocol output is capped at 8 MiB, individual messages at 256 KiB, submitted text at 64 KiB, and rendered response at 256 KiB. RPC setup steps have 30-second deadlines; generation has a five-minute deadline. Cancellation kills/reaps the official process. Provider-requested client capabilities are rejected. Responses are rendered as inert text; commands and links are never executed.
+
+Temporary client profiles are removed after completion, cancellation, or handled failure. An OS crash or forced kill can leave temporary files under `providers/requests`; they remain in the private application-data directory and can be removed with the app stopped. The latest response is held in app memory until exit or another request. Provider-side data retention follows the provider's policies. Local deletion is not a forensic erasure guarantee.
+
+## Verification and remaining gates
+
+On macOS, both real signed-in subscriptions produced streamed responses to synthetic text through the backend and native UI. Synthetic adversarial probes attempted file reads/writes, a local HTTP fetch, and subagent use; no canary content, marker write, HTTP connection, or tool notification was observed. Automated tests cover quota refusal, exact reviewed payloads, review reset, restored-session controls, and missing-tool setup. These checks are bounded evidence, not an independent security audit.
+
+Physical Windows login, inference, installation prompts, and capture-driver behavior remain to be exercised. CI builds do not close those gates. See [verification](verification.md) for commands and [roadmap](roadmap.md) for broader alpha limits.
 
 ## Official integration references
 
-**ChatGPT:** [Codex App Server](https://learn.chatgpt.com/docs/app-server) documents a supported product-embedding protocol with managed ChatGPT browser/device authentication and account/usage inspection. [Authentication](https://learn.chatgpt.com/docs/auth) and [Windows sandbox behavior](https://learn.chatgpt.com/docs/windows/windows-sandbox) matter. Codex subscription allowances are distinct from ordinary ChatGPT conversation limits. Source is Apache-2.0; service access still has its own terms.
-
-**Grok:** [Grok in OpenCode](https://x.ai/news/grok-opencode) establishes a supported subscription-login path. [Grok Build headless scripting](https://docs.x.ai/build/cli/headless-scripting), [CLI reference](https://docs.x.ai/build/cli/reference), and the [first-party source](https://github.com/xai-org/grok-build) offer candidate ACP/stdio integration. [Enterprise configuration](https://docs.x.ai/build/enterprise) documents API-key authentication precedence and disabling API-key auth. Do not inherit ambient API credentials into a subscription-only client.
-
-Grok [subscription policies](https://docs.x.ai/grok/faq) describe shared allowances and possible use of purchased credits. A subscription login by itself does not prove a request cannot incur credit use. [Sandbox documentation](https://docs.x.ai/build/features/sandbox) also shows differences across platforms; read-only does not mean the client can read only the approved summary. In-process network tools may be outside child-process sandbox restrictions.
-
-## Required acceptance checks
-
-1. Complete operator browser consent, account display, logout and re-authentication on both macOS and Windows; verify subscription eligibility. Signed-out protocol tests and device-code issuance alone do not complete this gate.
-2. Only the exact reviewed text enters a request. A new request needs fresh review; background polling cannot trigger inference.
-3. Disable shell, filesystem, web search, subagents, memory, environment instructions, and unrelated workspace access through supported controls. Use an isolated directory and scrub ambient API credentials. Demonstrate containment with adversarial tests; a working login is insufficient.
-4. Inspect quota before requests where supported, fail closed on exhausted/unknown billing mode, and prevent automatic purchased-credit or API fallback. No UI claim of subscription-only operation without evidence.
-5. Cancellation, deadlines, process cleanup, bounded protocol messages, and prompt/response log retention controls.
-6. Present provider output as untrusted explanation tied to local evidence. Never execute its commands or turn it into network blocking.
-7. Resolve distribution/license notices and expose a clear supported-client version range.
-
-A developer protocol spike must use synthetic reviewed text. Live account sign-in and inference require the operator's own authentication and an explicit reviewed submission. Until these gates are met, the app keeps embedded inference disabled.
+- [Codex App Server](https://learn.chatgpt.com/docs/app-server) and [authentication](https://learn.chatgpt.com/docs/auth).
+- [Grok Build headless scripting](https://docs.x.ai/build/cli/headless-scripting), [CLI reference](https://docs.x.ai/build/cli/reference), and [first-party source](https://github.com/xai-org/grok-build). ACP extension method names have an underscore prefix on the wire, for example `_x.ai/billing`.
+- [Grok subscription policies](https://docs.x.ai/grok/faq) and [enterprise authentication configuration](https://docs.x.ai/build/enterprise).

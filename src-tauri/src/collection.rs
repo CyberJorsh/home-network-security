@@ -114,7 +114,13 @@ impl Collection {
     pub fn stop(&self) {
         self.cancel.store(true, Ordering::Relaxed);
     }
-    pub fn start(&self, kind: &str, target: String, seconds: u64) -> Result<String, String> {
+    pub fn start(
+        &self,
+        kind: &str,
+        target: String,
+        seconds: u64,
+        services: bool,
+    ) -> Result<String, String> {
         if kind != "discover" && kind != "capture" {
             return Err("Unknown collection operation".into());
         }
@@ -168,7 +174,7 @@ impl Collection {
                     store.set_sensor(&sensor)?;
                 }
                 if kind == "discover" {
-                    let found = discover_cancellable(&target, &cancel)?;
+                    let found = discover_with_services(&target, services, &cancel)?;
                     store.save_discovery(&id, &found)?;
                     Ok(found.len())
                 } else {

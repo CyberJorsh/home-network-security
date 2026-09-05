@@ -29,6 +29,10 @@ export default function HostCollection({
   const [error, setError] = useState('');
   const [starting, setStarting] = useState(false);
   const [checking, setChecking] = useState(false);
+  const [services, setServices] = useState(false);
+  const [installing, setInstalling] = useState<'discover' | 'capture' | null>(
+    null,
+  );
   const inspect = async () => {
     setChecking(true);
     setError('');
@@ -39,6 +43,7 @@ export default function HostCollection({
       setDevice((value) =>
         result.interfaces.some((i) => i.id === value) ? value : '',
       );
+      return result;
     } catch (e) {
       setError(String(e));
     } finally {
@@ -73,7 +78,32 @@ export default function HostCollection({
       clearInterval(interval);
     };
   }, []);
+  const install = async (kind: 'discover' | 'capture', permission = false) => {
+    setError('');
+    setStarting(true);
+    try {
+      const opened = await command<boolean>('install_collection_tool', {
+        tool: permission
+          ? 'capture-permission'
+          : kind === 'discover'
+            ? 'nmap'
+            : 'tshark',
+      });
+      if (opened) setInstalling(kind);
+    } catch (e) {
+      setError(String(e));
+    } finally {
+      setStarting(false);
+    }
+  };
   const start = async (kind: 'discover' | 'capture') => {
+    if (
+      (kind === 'discover' && !host?.discoveryAvailable) ||
+      (kind === 'capture' && host?.captureError)
+    ) {
+      await install(kind);
+      return;
+    }
     setStarting(true);
     setError('');
     try {
@@ -81,6 +111,7 @@ export default function HostCollection({
         kind,
         target: kind === 'discover' ? cidr : device,
         seconds: Number(seconds),
+        services,
       });
       setJob({ running: true, kind, count: 0, sensorId: sensor, error: null });
       onLocal(sensor);
@@ -161,11 +192,20 @@ export default function HostCollection({
               <option key={value} value={value} />
             ))}
           </datalist>
+          <label className="checkbox-label">
+            <input
+              type="checkbox"
+              checked={services}
+              disabled={busy}
+              onChange={(e) => setServices(e.target.checked)}
+            />
+            <span>
+              Also check 20 common TCP ports and identify responding services
+            </span>
+          </label>
           <button
             className="button primary"
-            disabled={
-              !native || busy || !host?.discoveryAvailable || !cidr.trim()
-            }
+            disabled={!native || busy || !host || !cidr.trim()}
           >
             Discover devices
           </button>
@@ -186,9 +226,14 @@ export default function HostCollection({
             id="capture-interface"
             value={device}
             onChange={(e) => setDevice(e.target.value)}
-            required
+            required={!host?.captureError}
+            disabled={Boolean(host?.captureError)}
           >
-            <option value="">Choose an interface</option>
+            <option value="">
+              {host?.captureError
+                ? 'Install TShark to list interfaces'
+                : 'Choose an interface'}
+            </option>
             {host?.interfaces.map((i) => (
               <option key={i.id} value={i.id}>
                 {i.label}
@@ -207,12 +252,46 @@ export default function HostCollection({
           />
           <button
             className="button primary"
-            disabled={!native || busy || !device}
+            disabled={
+              !native || busy || !host || (!device && !host.captureError)
+            }
           >
             Start capture
           </button>
         </form>
       </div>
+      {installing && (
+        <div className="integration-status" role="status">
+          <strong>Finish installation in the terminal</strong>
+          <p>
+            Complete any installer or administrator prompts, then continue here.
+            Choose an interface before starting capture.
+          </p>
+          <button
+            className="button secondary"
+            disabled={checking}
+            onClick={() =>
+              void inspect().then((result) => {
+                if (
+                  result &&
+                  (installing === 'discover'
+                    ? result.discoveryAvailable
+                    : !result.captureError)
+                ) {
+                  setInstalling(null);
+                  setError('Tools detected. You can now start collection.');
+                } else {
+                  setError(
+                    'The required tools are not available yet. Complete the installer and try again.',
+                  );
+                }
+              })
+            }
+          >
+            Continue after installation
+          </button>
+        </div>
+      )}
       {job?.kind && (
         <div className="integration-status" role="status">
           <strong>
@@ -233,6 +312,17 @@ export default function HostCollection({
             <p role="alert" className="tool-output">
               {job.error}
             </p>
+          )}
+          {job.error && job.kind === 'capture' && (
+            <button
+              className="button secondary"
+              disabled={starting}
+              onClick={() =>
+                void install('capture', host?.platform === 'macos')
+              }
+            >
+              Set up capture permissions
+            </button>
           )}
           <div className="button-row">
             {job.running && (
