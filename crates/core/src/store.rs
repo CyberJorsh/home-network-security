@@ -117,6 +117,7 @@ impl Store {
         let observations = input
             .lines()
             .filter(|l| !l.trim().is_empty())
+            .take(MAX_EVENTS + 1)
             .map(|line| {
                 let mut o: Observation = serde_json::from_str(line)?;
                 o.sensor_id = sensor.into();
@@ -149,6 +150,9 @@ impl Store {
         if !self.sensors()?.iter().any(|s| s.id == sensor) {
             bail!("Unknown sensor");
         }
+        if devices.len() > 4096 {
+            bail!("Discovery exceeds 4,096 addresses");
+        }
         for device in devices {
             self.conn.execute(
                 "INSERT OR REPLACE INTO discovery VALUES (?1,?2,?3,?4)",
@@ -159,6 +163,11 @@ impl Store {
                     serde_json::to_string(device)?
                 ],
             )?;
+        }
+        if let Some(mut current) = self.sensors()?.into_iter().find(|s| s.id == sensor) {
+            current.last_seen = Some(chrono::Utc::now().timestamp());
+            current.status = "discovery complete".into();
+            self.set_sensor(&current)?;
         }
         Ok(())
     }

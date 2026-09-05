@@ -108,6 +108,32 @@ describe('privacy boundary', () => {
     expect(text).toContain('10.0.0.3');
     expect(text).not.toContain('203.0.113.2');
   });
+  it('does not leak identifiers hidden inside imported free-form metadata', () => {
+    const unusual: Snapshot = {
+      ...sample,
+      conversations: [
+        {
+          ...sample.conversations[0],
+          protocol: 'private-10.0.0.2',
+        },
+      ],
+    };
+    const text = buildSummary(unusual, 'secret-id', true, {
+      id: 'a',
+      deviceId: 'secret-id',
+      title: 'Private laptop 10.0.0.2',
+      detail: '02:11:22:33:44:55',
+      severity: 'info',
+      evidence: ['wan'],
+      timestamp: 1,
+      acknowledged: false,
+    });
+    expect(text).not.toContain('10.0.0.2');
+    expect(text).not.toContain('Private laptop');
+    expect(text).not.toContain('02:11:22:33:44:55');
+    expect(text).toContain('Other');
+    expect(text).toContain('Selected observation');
+  });
   it('requires a selected existing device', () =>
     expect(() => buildSummary(sample, 'missing')).toThrow());
   it('labels sample evidence clearly', () =>

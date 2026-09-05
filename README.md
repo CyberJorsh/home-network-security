@@ -6,6 +6,8 @@ An open-source desktop application for **macOS and Windows**, with a Rust collec
 
 > **v0.1 alpha.** This is an observation tool, not a replacement for a firewall or a proven intrusion-detection system. Collection coverage depends on your hardware and sensor placement. Direct ChatGPT/Grok subscription sign-in is still being developed; the alpha offers an editable, reviewed summary for manual use in either provider's own app.
 
+![Native Mac app showing synthetic sample observations](docs/sample-overview.png)
+
 ## What you can do
 
 - Explore a clearly labeled synthetic home network without scanning anything.

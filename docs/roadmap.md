@@ -15,3 +15,5 @@ The source is an early functional alpha. Publishing it does not complete the ful
 | Local privacy            | No telemetry/cloud backend; native storage boundary           | Local-data export/reset UI, installation review, independent security review                            |
 
 Use repository issues to scope these gates. A gate is closed by direct evidence for the target environment, not by changing this table or passing a compiler.
+
+Tracked work: [subscription AI](https://github.com/CyberJorsh/home-network-security/issues/1), [real coverage and Windows device validation](https://github.com/CyberJorsh/home-network-security/issues/2), [signed distribution](https://github.com/CyberJorsh/home-network-security/issues/3), and [guided collection and history](https://github.com/CyberJorsh/home-network-security/issues/4).

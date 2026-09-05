@@ -148,6 +148,7 @@ export default function App() {
     setPage(next);
     setQuery('');
     setDetail(null);
+    window.scrollTo({ top: 0 });
   };
   const showDevice = (id: string) => {
     setDetail(id);
@@ -184,6 +185,7 @@ export default function App() {
       if (previous instanceof HTMLElement) previous.focus();
     };
   }, [detail]);
+  const isSample = mode === 'demo' || snapshot?.mode === 'demo';
   const currentSensor = snapshot?.sensors.find(
     (s) => s.id === snapshot.selectedSensor,
   );
@@ -275,9 +277,9 @@ export default function App() {
                 ))}
               </select>
             )}
-            <span className={`pill ${mode === 'demo' ? 'sample' : ''}`}>
+            <span className={`pill ${isSample ? 'sample' : ''}`}>
               <span className="status-dot" />
-              {mode === 'demo'
+              {isSample
                 ? 'Sample network'
                 : snapshot?.mode === 'collector'
                   ? 'Connected collector'
@@ -330,14 +332,14 @@ export default function App() {
               </button>
             )}
           </div>
-          {mode === 'demo' && (
+          {isSample && (
             <div className="sample-note">
               <span>
                 <Sparkles size={15} />
                 <strong>You’re exploring a sample home.</strong> These are
                 synthetic observations, not your network.
               </span>
-              {native ? (
+              {native && mode === 'demo' ? (
                 <button
                   onClick={() => {
                     setMode('local');
@@ -347,7 +349,9 @@ export default function App() {
                   Exit sample <ArrowRight size={14} />
                 </button>
               ) : (
-                <span className="muted">Browser preview</span>
+                <span className="muted">
+                  {native ? 'Connected sample collector' : 'Browser preview'}
+                </span>
               )}
             </div>
           )}

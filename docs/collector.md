@@ -57,7 +57,7 @@ The IPv6 example is documentation-only; use your actual delegated prefix. Prefix
 
 NDJSON contains one validated observation per line. See `fixtures/sample.ndjson` and `crates/core/src/model.rs`. Imports replace `sensorId` with the explicitly selected import sensor. `(sensorId,id)` is idempotent while retained; replaying records evicted by retention can reinsert them. PCAP IDs use a capture hash and frame number; separately captured copies of the same packet are not deduplicated automatically.
 
-PCAP input is capped at 256 MiB, decoded output at 64 MiB, and 100,000 IP frames per import. Import timeout is 120 seconds. NDJSON input is capped at 32 MiB. Nmap XML is capped at 16 MiB; external/internal entity declarations are rejected, while Nmap's bare standard doctype is accepted. Live Nmap discovery has a five-minute deadline. Split large files before importing; rejected imports do not partially add observations.
+PCAP input is capped at 256 MiB, decoded output at 64 MiB, and 100,000 IP frames per import. Import timeout is 120 seconds. NDJSON input is capped at 32 MiB. Nmap XML is capped at 16 MiB and 4,096 returned addresses; external/internal entity declarations are rejected, while Nmap's bare standard doctype is accepted. Live Nmap discovery has a five-minute deadline. Split large files before importing; rejected imports do not partially add observations.
 
 ## Storage
 

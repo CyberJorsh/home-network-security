@@ -283,6 +283,9 @@ pub fn parse_nmap(xml: &str) -> Result<Vec<DiscoveredDevice>> {
             _ => {}
         }
     }
+    if devices.len() > 4096 {
+        bail!("Discovery exceeds 4,096 addresses; narrow the input");
+    }
     Ok(devices)
 }
 
@@ -315,6 +318,24 @@ pub fn discover(cidr: &str) -> Result<Vec<DiscoveredDevice>> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    #[cfg(unix)]
+    fn external_tool_output_and_runtime_are_bounded() {
+        let mut command = Command::new("printf");
+        command.arg("12345");
+        assert!(bounded_output(&mut command, 4, Duration::from_secs(1)).is_err());
+        let mut command = Command::new("printf");
+        command.arg("1234");
+        assert_eq!(
+            bounded_output(&mut command, 4, Duration::from_secs(1)).unwrap(),
+            b"1234"
+        );
+        let mut command = Command::new("sleep");
+        command.arg("2");
+        let started = Instant::now();
+        assert!(bounded_output(&mut command, 4, Duration::from_millis(50)).is_err());
+        assert!(started.elapsed() < Duration::from_secs(1));
+    }
     #[test]
     fn parses_ipv6_and_preserves_frame_bytes() {
         let o=parse_tshark("8\t1780000000.123\t\tfd00::1\t\t2606:4700::1111\t02:00:00:00:00:11\t02:00:00:00:00:01\t\t3000\t\t53\tDNS\t128","a","cap").unwrap().unwrap();

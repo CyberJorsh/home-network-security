@@ -4,7 +4,7 @@ The required providers are **ChatGPT and Grok**, using supported subscription au
 
 ## Current alpha
 
-Two provider choices are available. The app prepares at most twelve relevant conversations, aliases names and addresses by default, omits MACs and capture payloads, freezes the prepared text, and requires review of the exact text. Editing resets that review. Copying uses the local clipboard. Opening a provider uses only its fixed homepage URL; it does not submit the text.
+Two provider choices are available. The app prepares at most twelve relevant conversations, aliases names and addresses by default, omits MACs and capture payloads, freezes the prepared text, and requires review of the exact text. Editing or switching the provider resets that review. With aliases enabled, unknown free-form protocol labels and alert text are omitted to prevent identifiers hidden in metadata from bypassing redaction. Copying uses the local clipboard. Opening a provider uses only its fixed homepage URL; it does not submit the text.
 
 This is a useful manual workflow, **not completed embedded subscription AI**. There is no fake login button, OAuth credential scraping, imported browser cookie, automatic request, or API-billing substitute.
 

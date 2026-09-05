@@ -78,6 +78,22 @@ export function buildSummary(
     if (!aliases.has(ip)) aliases.set(ip, `endpoint-${aliases.size + 1}`);
     return aliases.get(ip)!;
   };
+  // Free-form imported labels can contain identifiers too. Do not copy those
+  // fields through the alias boundary merely because they are called metadata.
+  const protocol = (value: string) =>
+    !redact ||
+    /^(TCP|UDP|TLS(v1(\.[0-3])?)?|QUIC|HTTP[23]?|HTTPS|DNS|MDNS|ARP|ICMP(v6)?|DHCP(v6)?|NTP|SSDP|STUN|DTLS(v1(\.[0-3])?)?|SSH|SMB[23]?|IGMP(v[123])?|LLMNR|NBNS)$/i.test(
+      value,
+    )
+      ? value
+      : 'Other';
+  const coverage = (value: string | undefined) =>
+    value && ['unverified', 'partial', 'verified', 'unknown'].includes(value)
+      ? value
+      : 'unknown';
+  const selectedSensor = snapshot.sensors.find(
+    (s) => s.id === snapshot.selectedSensor,
+  );
   const record = {
     context:
       snapshot.mode === 'demo'
@@ -89,12 +105,8 @@ export function buildSummary(
       lastObservation: date(device.lastSeen),
     },
     coverage: {
-      internet:
-        snapshot.sensors.find((s) => s.id === snapshot.selectedSensor)
-          ?.internetCoverage ?? 'unknown',
-      lan:
-        snapshot.sensors.find((s) => s.id === snapshot.selectedSensor)
-          ?.lanCoverage ?? 'unknown',
+      internet: coverage(selectedSensor?.internetCoverage),
+      lan: coverage(selectedSensor?.lanCoverage),
       limitedView: snapshot.limited,
     },
     totals: {
@@ -102,14 +114,32 @@ export function buildSummary(
       downloadedBytes: device.download,
       localBytes: device.localBytes,
     },
-    alert: alert ? { title: alert.title, detail: alert.detail } : null,
+    alert: alert
+      ? redact
+        ? {
+            title: ['Device observed', 'Large observed upload'].includes(
+              alert.title,
+            )
+              ? alert.title
+              : 'Selected observation',
+          }
+        : { title: alert.title, detail: alert.detail }
+      : null,
     conversations: flows.map((c, i) => ({
       evidence: `E${i + 1}`,
       from: alias(c.src),
       to: alias(c.dst),
       port: c.port,
-      protocol: c.protocol,
-      direction: c.direction,
+      protocol: protocol(c.protocol),
+      direction: [
+        'upload',
+        'download',
+        'local',
+        'multicast',
+        'transit',
+      ].includes(c.direction)
+        ? c.direction
+        : 'unknown',
       bytes: c.bytes,
       packets: c.packets,
     })),

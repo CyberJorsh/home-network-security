@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE nmaprun>
+<!-- Synthetic fixture. These hosts were not scanned. -->
+<nmaprun scanner="nmap">
+  <host><status state="up"/><address addr="192.168.50.10" addrtype="ipv4"/><address addr="02:00:00:00:50:10" addrtype="mac" vendor="Synthetic vendor"/><hostnames><hostname name="sample-discovery.local" type="user"/></hostnames></host>
+  <host><status state="up"/><address addr="192.168.50.20" addrtype="ipv4"/></host>
+  <host><status state="down"/><address addr="192.168.50.30" addrtype="ipv4"/></host>
+</nmaprun>

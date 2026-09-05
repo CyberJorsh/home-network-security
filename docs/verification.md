@@ -22,3 +22,9 @@ Record observed evidence rather than marking an item complete because a build pa
 8. On an explicitly authorized topology, verify WAN and local transfers, interfaces, permissions, dropped-packet reporting, and failure recovery. No real-network validation is implied by synthetic fixtures.
 
 No live home-network traffic, provider login/inference, or signed distribution is asserted by these tests.
+
+## Initial alpha validation record
+
+On 2026-09-05 UTC, the native Mac application was launched and exercised with synthetic data: empty local storage, isolated sample mode, device rename, authenticated connection to a local synthetic collector, native Nmap XML import (two discovered devices with zero traffic records), NDJSON import (840 observations), automatic selection of the imported source, local-traffic filtering, supporting alert conversations, and alert acknowledgement. Browser interaction verified that redacted summaries omit the sample endpoint identifiers and that editing the approved text revokes approval and disables sharing controls.
+
+The hosted [initial integration run](https://github.com/CyberJorsh/home-network-security/actions/runs/33937390849) passed the real TShark four-packet synthetic import and the authenticated HTTP smoke check. Consult the latest Actions run for current source and platform results. Local checks also passed: TypeScript production build, eight frontend tests, fifteen Rust tests on Mac (including the Unix-only subprocess bound test), rustfmt, Prettier, clippy with warnings denied, and npm dependency audit. No live capture, active home-network scan, provider request, signed release, or real Windows GUI verification was performed.
