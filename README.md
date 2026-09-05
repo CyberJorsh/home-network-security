@@ -27,7 +27,7 @@ The app never starts a capture or discovery scan automatically. It does not bloc
 
 ## Try it
 
-Prerequisites: Node.js 22.12+ and current stable Rust. The desktop build also needs [Tauri's platform prerequisites](https://v2.tauri.app/start/prerequisites/): Xcode command-line tools on macOS; Visual Studio C++ build tools and WebView2 on Windows. Run commands from the repository root.
+Prerequisites: Node.js 22.22.2+ (or 24.15+) and current stable Rust. The desktop build also needs [Tauri's platform prerequisites](https://v2.tauri.app/start/prerequisites/): Xcode command-line tools on macOS; Visual Studio C++ build tools and WebView2 on Windows. Run commands from the repository root.
 
 ```sh
 npm ci

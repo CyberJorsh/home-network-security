@@ -1,6 +1,7 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 mod collection;
 mod explanations;
+mod host_identity;
 mod installers;
 mod providers;
 use hns_core::*;

@@ -222,7 +222,10 @@ impl Store {
             found.details.hostname = found.details.hostname.or(found.hostname.clone());
             found.details.vendor = found.details.vendor.or(found.vendor.clone());
             found.details.observed_at = Some(ts);
-            found.details.source = Some("Nmap discovery".into());
+            found
+                .details
+                .source
+                .get_or_insert_with(|| "Nmap discovery".into());
             let id = device_id(selected.as_deref().unwrap_or(""), &found.ip, &found.mac);
             let name = names
                 .get(&id)
@@ -247,7 +250,14 @@ impl Store {
                 found.details.hostname = found.details.hostname.or(found.hostname.clone());
                 found.details.vendor = found.details.vendor.or(found.vendor.clone());
                 found.details.observed_at = Some(ts);
-                found.details.source = Some("Local Nmap discovery; matched MAC and IP".into());
+                found.details.source = Some(format!(
+                    "{}; matched MAC and IP",
+                    found
+                        .details
+                        .source
+                        .as_deref()
+                        .unwrap_or("Local Nmap discovery")
+                ));
                 if let Some(mac) = &found.mac {
                     host_hints.insert((found.ip.clone(), mac.to_lowercase()), (ts, found));
                 }

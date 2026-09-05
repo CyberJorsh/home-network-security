@@ -51,3 +51,5 @@ HNS_TEST_PROVIDER_ROOT=/path/to/app/providers cargo test -p home-network-securit
 ```
 
 Keep live account metadata, inventories, captures, and private test artifacts out of public reports. A passing synthetic containment probe is not a complete security audit or proof of Windows runtime behavior.
+
+The updated macOS UI also completed an explicit service scan of the local computer and displayed the observed service/product/version in its device details and review summary. OS identity enrichment is tested to apply only to this computer's own interface addresses; neighboring devices retain unknown values.

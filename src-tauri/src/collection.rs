@@ -174,7 +174,11 @@ impl Collection {
                     store.set_sensor(&sensor)?;
                 }
                 if kind == "discover" {
-                    let found = discover_with_services(&target, services, &cancel)?;
+                    let mut found = discover_with_services(&target, services, &cancel)?;
+                    if !cancel.load(Ordering::Relaxed) {
+                        crate::host_identity::enrich(&mut found, &cancel);
+                    }
+                    anyhow::ensure!(!cancel.load(Ordering::Relaxed), "Collection cancelled");
                     store.save_discovery(&id, &found)?;
                     Ok(found.len())
                 } else {
