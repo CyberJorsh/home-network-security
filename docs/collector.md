@@ -64,3 +64,13 @@ PCAP input is capped at 256 MiB, decoded output at 64 MiB, and 100,000 IP frames
 CLI default: `.data/network.db` in your working directory. Desktop: Tauri's per-user local application-data directory under identifier `io.github.cyberjorsh.home-network-security`. On macOS this is normally `~/Library/Application Support/io.github.cyberjorsh.home-network-security`; on Windows it is normally under `%LOCALAPPDATA%`. Sample mode is a separate in-memory database.
 
 The desktop polls every ten seconds. The latest 100,000 normalized observations are retained, with 10,000 per selected view. Device notes and review state persist separately. No archival rollups, wall-clock retention controls, or secure erase workflow are implemented yet.
+
+## Desktop collection controls
+
+Open **Collection → Scan from this computer**. The app enumerates actual TShark interfaces and local IP addresses, offers private IPv4 ranges of at most /24, and checks for Nmap. Choose the subnet before starting discovery; choose a concrete local interface and duration before capture. Both jobs run on workers while the UI continues reading SQLite. **Stop collection** cancels the active job, and closing the desktop stops its child processes. A capture can also stop automatically after its selected duration.
+
+Discovery and each capture interface get separate observation sources. Starting a job switches the dashboard to the local database and selects that source; it disconnects a remote collector connection. No raw capture file is created by the application. Live metadata and discovery records are private local data and must not be attached to public issues.
+
+On macOS, `brew install nmap wireshark` installs the CLI tools. Wireshark's signed ChmodBPF installer enables BPF access for members of `access_bpf`; Homebrew also exposes it as `brew install --cask wireshark-chmodbpf`. Administrator authorization is required. Restart the app after installation; depending on your environment, logging out or rebooting may be needed for group membership. On Windows install the Npcap driver with the appropriate license and permissions. Interface enumeration alone does not establish that a capture will succeed.
+
+Unprivileged discovery can miss devices that do not respond to its probes. Host capture typically sees the computer's own traffic plus broadcasts and multicast, not all conversations between other devices. Coverage remains unverified and packet drops are shown as unknown. Add your actual globally routed local IPv6 prefix in **Your local networks** for correct direction classification.

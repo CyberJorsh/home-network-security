@@ -2,11 +2,8 @@ use anyhow::{bail, Context, Result};
 use clap::{Parser, Subcommand};
 use hns_core::*;
 use std::{
-    io::{BufRead, BufReader, Read, Write},
+    io::{Read, Write},
     path::PathBuf,
-    process::Stdio,
-    sync::mpsc,
-    time::{Duration, Instant},
 };
 use subtle::ConstantTimeEq;
 use tiny_http::{Header, Response, Server, StatusCode};
@@ -125,119 +122,21 @@ fn main() -> Result<()> {
             println!("{}", serde_json::to_string_pretty(&found)?);
         }
         Action::Capture { interface, seconds } => {
-            capture(&mut store, &args.sensor, &interface, seconds)?
+            let count = capture(
+                &mut store,
+                &args.sensor,
+                &interface,
+                seconds,
+                &std::sync::atomic::AtomicBool::new(false),
+                |_| {},
+            )?;
+            println!("Recorded {count} IP observations. Packet drops remain unknown.");
         }
         Action::Serve {
             port, token_file, ..
         } => serve(store, port, &token_file, demo)?,
         Action::Doctor => unreachable!(),
     }
-    Ok(())
-}
-
-fn capture(store: &mut Store, sensor_id: &str, interface: &str, seconds: u64) -> Result<()> {
-    if interface.is_empty() || interface.len() > 256 || interface.starts_with('-') {
-        bail!("Invalid interface");
-    }
-    let mut sensor = store
-        .sensors()?
-        .into_iter()
-        .find(|s| s.id == sensor_id)
-        .context("Unknown sensor")?;
-    sensor.interface = interface.into();
-    sensor.kind = "tshark".into();
-    sensor.status = "collecting".into();
-    let mut child = tshark_command()
-        .args(["-i", interface, "-a", &format!("duration:{seconds}")])
-        .stdout(Stdio::piped())
-        .stderr(Stdio::inherit())
-        .spawn()
-        .context("Install TShark and configure capture permissions first")?;
-    if let Err(error) = store.set_sensor(&sensor) {
-        let _ = child.kill();
-        let _ = child.wait();
-        return Err(error);
-    }
-    let stdout = child.stdout.take().context("Missing capture stream")?;
-    let (tx, rx) = mpsc::sync_channel(2048);
-    let reader = std::thread::spawn(move || {
-        for line in BufReader::new(stdout).lines() {
-            if tx.send(line).is_err() {
-                break;
-            }
-        }
-    });
-    let capture_id = uuid::Uuid::new_v4().to_string();
-    let deadline = Instant::now() + Duration::from_secs(seconds + 10);
-    let mut batch = Vec::new();
-    let mut count = 0;
-    let mut failure = None;
-    let mut last_flush = Instant::now();
-    loop {
-        if Instant::now() > deadline {
-            failure = Some("Capture timed out".to_string());
-            break;
-        }
-        match rx.recv_timeout(Duration::from_millis(500)) {
-            Ok(Ok(line)) => match parse_tshark(&line, sensor_id, &capture_id) {
-                Ok(Some(o)) => batch.push(o),
-                Ok(None) => {}
-                Err(e) => {
-                    failure = Some(e.to_string());
-                    break;
-                }
-            },
-            Ok(Err(e)) => {
-                failure = Some(e.to_string());
-                break;
-            }
-            Err(mpsc::RecvTimeoutError::Disconnected) => break,
-            Err(mpsc::RecvTimeoutError::Timeout) => {}
-        }
-        if !batch.is_empty()
-            && (batch.len() >= 256 || last_flush.elapsed() >= Duration::from_millis(250))
-        {
-            match store.ingest(&batch) {
-                Ok(n) => count += n,
-                Err(e) => {
-                    failure = Some(e.to_string());
-                    break;
-                }
-            }
-            batch.clear();
-            last_flush = Instant::now();
-        }
-    }
-    if failure.is_some() {
-        let _ = child.kill();
-    }
-    drop(rx);
-    let _ = reader.join();
-    let status = child.wait()?;
-    if !batch.is_empty() && failure.is_none() {
-        count += store.ingest(&batch)?;
-    }
-    sensor.status = if status.success() && failure.is_none() {
-        "stopped"
-    } else {
-        "error"
-    }
-    .into();
-    sensor.last_seen = store
-        .sensors()?
-        .into_iter()
-        .find(|s| s.id == sensor_id)
-        .and_then(|s| s.last_seen);
-    store.set_sensor(&sensor)?;
-    if let Some(error) = failure {
-        bail!("{error}");
-    }
-    if !status.success() {
-        bail!("TShark exited unsuccessfully. Captured data may be incomplete.");
-    }
-    println!(
-        "Recorded {count} observations. Packet drops are unknown; inspect TShark diagnostics."
-    );
     Ok(())
 }
 

@@ -1,14 +1,26 @@
-# Subscription AI integration: implementation gate
+# Subscription authentication and AI integration
 
 The required providers are **ChatGPT and Grok**, using supported subscription authentication. API keys and paid API fallback do not satisfy that requirement. Core collection and alerts must continue to work without either account.
 
-## Current alpha
+## Real desktop sign-in
 
-Two provider choices are available. The app prepares at most twelve relevant conversations, aliases names and addresses by default, omits MACs and capture payloads, freezes the prepared text, and requires review of the exact text. Editing or switching the provider resets that review. With aliases enabled, unknown free-form protocol labels and alert text are omitted to prevent identifiers hidden in metadata from bypassing redaction. Copying uses the local clipboard. Opening a provider uses only its fixed homepage URL; it does not submit the text.
+In **AI explanations**, choose ChatGPT or Grok and click **Sign in**. The app starts the installed official client with device authorization, displays its one-time code, and offers the provider's sign-in page. Finish consent in your browser. **Check session** reads the client's actual authentication state; **Sign out** clears this app's profile. Cancelling terminates the local login process; a previously issued device code can remain valid until the provider expires it.
 
-This is a useful manual workflow, **not completed embedded subscription AI**. There is no fake login button, OAuth credential scraping, imported browser cookie, automatic request, or API-billing substitute.
+Install the [official Codex CLI](https://developers.openai.com/codex/cli/) for ChatGPT and [Grok Build CLI](https://docs.x.ai/build/cli) for Grok. Protocol checks have been exercised with Codex **0.153.1** and Grok Build **1.0.18** on macOS. Clients are installed separately, not redistributed by this project. The desktop app resolves normal package-manager locations and npm's native Codex executable; it does not execute shell command strings. Windows installations should use an official native executable or the standard npm Codex installation. Restart after installing clients.
 
-## Supported paths under investigation
+Each provider receives an isolated profile under the app's local data directory, in `providers/chatgpt` or `providers/grok`, and an empty working directory. Existing CLI accounts are not imported or modified. Only an allowlist of OS environment variables reaches a client. ChatGPT forces ChatGPT login with file credentials inside that profile; Grok disables API-key authentication and pins session authentication. Profile directories are private to the current user on Unix and live inside the user's application-data directory on Windows. Credentials never enter the webview. Login instructions are held in memory, not copied to repository files.
+
+Account checks use Codex `initialize` and `account/read`, or Grok ACP `initialize` and `authenticate` with `cached_token`. They do **not** create model sessions or send prompts. These checks establish available client authentication, not remaining quota, subscription eligibility for every model, or successful inference. Expired or rejected sessions require signing in again. Requests have bounded output, deadlines, and process cleanup; unrequested RPC capabilities are rejected.
+
+The browser preview remains synthetic and cannot perform native authentication or collection.
+
+## Explanations still require manual submission
+
+The app prepares at most twelve relevant conversations, aliases names and addresses by default, omits MACs and capture payloads, freezes the prepared text, and requires review of the exact text. Editing or switching the provider resets review. With aliases enabled, unknown free-form protocol labels and alert text are omitted. Copy the reviewed summary and paste it into the provider's own app when ready. Opening a provider homepage does not submit the text.
+
+**Real subscription sign-in is implemented; embedded model inference remains gated below.** Authentication alone does not establish summary-only tool containment or prevent purchased-credit consumption. No model call, API key fallback, browser-cookie import, or automatic network-data upload is implemented.
+
+## Official integration references
 
 **ChatGPT:** [Codex App Server](https://learn.chatgpt.com/docs/app-server) documents a supported product-embedding protocol with managed ChatGPT browser/device authentication and account/usage inspection. [Authentication](https://learn.chatgpt.com/docs/auth) and [Windows sandbox behavior](https://learn.chatgpt.com/docs/windows/windows-sandbox) matter. Codex subscription allowances are distinct from ordinary ChatGPT conversation limits. Source is Apache-2.0; service access still has its own terms.
 
@@ -18,7 +30,7 @@ Grok [subscription policies](https://docs.x.ai/grok/faq) describe shared allowan
 
 ## Required acceptance checks
 
-1. Official sign-in, sign-out, account display, expiry/re-authentication, and subscription eligibility on both macOS and Windows.
+1. Complete operator browser consent, account display, logout and re-authentication on both macOS and Windows; verify subscription eligibility. Signed-out protocol tests and device-code issuance alone do not complete this gate.
 2. Only the exact reviewed text enters a request. A new request needs fresh review; background polling cannot trigger inference.
 3. Disable shell, filesystem, web search, subagents, memory, environment instructions, and unrelated workspace access through supported controls. Use an isolated directory and scrub ambient API credentials. Demonstrate containment with adversarial tests; a working login is insufficient.
 4. Inspect quota before requests where supported, fail closed on exhausted/unknown billing mode, and prevent automatic purchased-credit or API fallback. No UI claim of subscription-only operation without evidence.

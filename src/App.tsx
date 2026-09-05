@@ -32,6 +32,8 @@ import type { Alert, Page, Provider, Snapshot } from './types';
 import { acknowledge, command, native, readSnapshot, rename } from './api';
 import { buildSummary, bytes, date, filterConversations } from './lib';
 import Chart from './components/Chart';
+import HostCollection from './components/HostCollection';
+import ProviderAuth from './components/ProviderAuth';
 import TrafficTable from './components/TrafficTable';
 
 const navigation = [
@@ -736,6 +738,11 @@ export default function App() {
                 <Collection
                   snapshot={snapshot}
                   busy={busy}
+                  onLocal={(id) => {
+                    setMode('local');
+                    setSensor(id);
+                    void loadSnapshot('local', id);
+                  }}
                   onImport={importFile}
                   onSample={() => {
                     setMode('demo');
@@ -984,6 +991,7 @@ function Empty({
 }
 
 function Collection({
+  onLocal,
   snapshot,
   busy,
   onImport,
@@ -994,6 +1002,7 @@ function Collection({
 }: {
   snapshot: Snapshot;
   busy: boolean;
+  onLocal: (sensor: string) => void;
   onImport: () => void;
   onSample: () => void;
   onConnect: (port: number, token: string) => Promise<void>;
@@ -1005,6 +1014,7 @@ function Collection({
   const [cidrs, setCidrs] = useState(snapshot.networks.join(','));
   return (
     <div className="collection-grid">
+      <HostCollection onLocal={onLocal} />
       <section className="panel setup-panel">
         <span className="setup-icon">
           <Radio size={25} />
@@ -1245,14 +1255,12 @@ function Assistant({
             </button>
           ))}
         </div>
-        <div className="integration-status">
-          <strong>Direct sign-in is under development</strong>
-          <p>
-            This alpha provides a reviewed summary you can paste into the
-            provider’s own app. Embedded subscription login and inference are
-            not enabled yet.
-          </p>
-        </div>
+        <ProviderAuth key={provider} provider={provider} />
+        <p className="hint">
+          You can test real sign-in here. Explanations still use the reviewed
+          copy-and-paste workflow below; embedded model requests remain disabled
+          while tool containment and credit controls are verified.
+        </p>
         <label htmlFor="summary-device">Device to explain</label>
         <select
           id="summary-device"

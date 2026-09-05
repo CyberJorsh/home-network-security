@@ -1,4 +1,6 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
+mod collection;
+mod providers;
 use hns_core::*;
 use serde::{Deserialize, Serialize};
 use std::{
@@ -11,6 +13,8 @@ struct AppState {
     local: Mutex<Store>,
     demo: Mutex<Store>,
     remote: Mutex<Option<Remote>>,
+    collection: collection::Collection,
+    providers: providers::Providers,
 }
 #[derive(Clone, Deserialize)]
 struct Remote {
@@ -212,6 +216,9 @@ fn open_provider_impl(provider: String) -> CmdResult<()> {
         "grok" => "https://grok.com/",
         _ => return Err("Unknown provider".into()),
     };
+    open_url(url)
+}
+fn open_url(url: &str) -> CmdResult<()> {
     #[cfg(target_os = "macos")]
     let status = std::process::Command::new("open").arg(url).status();
     #[cfg(target_os = "windows")]
@@ -307,16 +314,80 @@ async fn open_provider(provider: String) -> CmdResult<()> {
         .map_err(error)?
 }
 
+#[tauri::command]
+async fn inspect_host() -> CmdResult<collection::Host> {
+    tauri::async_runtime::spawn_blocking(collection::inspect)
+        .await
+        .map_err(error)?
+}
+#[tauri::command]
+fn collection_status(state: State<'_, Arc<AppState>>) -> CmdResult<collection::Job> {
+    Ok(state.collection.job.lock().map_err(error)?.clone())
+}
+#[tauri::command]
+fn start_collection(
+    state: State<'_, Arc<AppState>>,
+    kind: String,
+    target: String,
+    seconds: u64,
+) -> CmdResult<String> {
+    let id = state.collection.start(&kind, target, seconds)?;
+    *state.remote.lock().map_err(error)? = None;
+    Ok(id)
+}
+#[tauri::command]
+fn stop_capture(state: State<'_, Arc<AppState>>) {
+    state.collection.stop();
+}
+#[tauri::command]
+fn auth_status(
+    state: State<'_, Arc<AppState>>,
+    provider: String,
+) -> CmdResult<providers::AuthStatus> {
+    state.providers.status(&provider).map_err(error)
+}
+#[tauri::command]
+fn auth_action(state: State<'_, Arc<AppState>>, provider: String, action: String) -> CmdResult<()> {
+    state.providers.action(provider, action).map_err(error)
+}
+#[tauri::command]
+async fn open_login(state: State<'_, Arc<AppState>>, provider: String) -> CmdResult<()> {
+    let url = state
+        .providers
+        .status(&provider)
+        .map_err(error)?
+        .login_url
+        .ok_or("No active sign-in URL")?;
+    if !providers::allowed_login_url(&provider, &url) {
+        return Err("Unsupported sign-in URL".into());
+    }
+    tauri::async_runtime::spawn_blocking(move || open_url(&url))
+        .await
+        .map_err(error)?
+}
+
 fn main() {
     tauri::Builder::default()
         .setup(|app| {
-            let path = app.path().app_local_data_dir()?.join("network.db");
+            let root = app.path().app_local_data_dir()?;
+            let path = root.join("network.db");
             app.manage(Arc::new(AppState {
                 local: Mutex::new(Store::open(&path)?),
                 demo: Mutex::new(demo_store()?),
                 remote: Mutex::new(None),
+                collection: collection::Collection::new(path),
+                providers: providers::Providers::new(root.join("providers")),
             }));
             Ok(())
+        })
+        .on_window_event(|window, event| {
+            if matches!(event, tauri::WindowEvent::Destroyed) {
+                let state = window.state::<Arc<AppState>>();
+                state.collection.stop();
+                state.providers.cancel_all();
+                state.collection.shutdown();
+                state.providers.shutdown();
+            }
         })
         .invoke_handler(tauri::generate_handler![
             snapshot,
@@ -326,7 +397,14 @@ fn main() {
             disconnect_collector,
             configure_networks,
             import_file,
-            open_provider
+            open_provider,
+            inspect_host,
+            collection_status,
+            start_collection,
+            stop_capture,
+            auth_status,
+            auth_action,
+            open_login
         ])
         .run(tauri::generate_context!())
         .expect("Unable to start Home Network Security");

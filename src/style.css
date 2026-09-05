@@ -1525,3 +1525,37 @@ main {
 .attention p {
   color: #73806b;
 }
+
+.host-collection {
+  grid-column: 1 / -1;
+}
+.host-controls {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 32px;
+  margin-top: 24px;
+}
+.host-controls h3 {
+  margin: 0;
+}
+.tool-output {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  font:
+    12px/1.6 ui-monospace,
+    monospace;
+  max-height: 280px;
+  overflow: auto;
+}
+.provider-auth .button-row {
+  flex-wrap: wrap;
+  gap: 10px;
+}
+.provider-auth details {
+  margin-top: 12px;
+}
+@media (max-width: 1050px) {
+  .host-controls {
+    grid-template-columns: 1fr;
+  }
+}

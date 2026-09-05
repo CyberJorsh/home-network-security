@@ -4,7 +4,7 @@ Understand the devices on your home network, their internet traffic, and their c
 
 An open-source desktop application for **macOS and Windows**, with a Rust collector that can run on a local computer, Linux VM, or Raspberry Pi. Observations stay on your devices. Discovery, traffic analysis, and evidence-backed alerts do not require AI.
 
-> **v0.1 alpha.** This is an observation tool, not a replacement for a firewall or a proven intrusion-detection system. Collection coverage depends on your hardware and sensor placement. Direct ChatGPT/Grok subscription sign-in is still being developed; the alpha offers an editable, reviewed summary for manual use in either provider's own app.
+> **v0.1 alpha.** This is an observation tool, not a replacement for a firewall or a proven intrusion-detection system. Collection coverage depends on your hardware and sensor placement. The desktop app supports real ChatGPT/Grok subscription sign-in through their official clients and local discovery/capture controls. AI explanations use an editable, reviewed summary for manual submission; embedded model inference is not enabled.
 
 ![Native Mac app showing synthetic sample observations](docs/sample-overview.png)
 
@@ -18,6 +18,10 @@ An open-source desktop application for **macOS and Windows**, with a Rust collec
 - Rename observed devices and mark alerts reviewed in local SQLite storage.
 - Connect the desktop app to a collector over loopback or a user-managed SSH tunnel.
 - Prepare a focused summary, redact names and addresses, edit it, and approve the exact text before copying it for ChatGPT or Grok.
+
+Open **Collection → Scan from this computer** to detect tools and interfaces, choose a local private subnet, and run device discovery. Choose an interface and duration for packet-metadata capture; the desktop dashboard reads the resulting local observations. Capture permissions and drivers are checked by the actual capture attempt. Discovery and capture do not start when the app launches.
+
+Open **AI explanations** to sign in, check the session, or sign out. Complete the official device-code consent in your browser. See [provider setup](docs/providers.md) for client installation and the distinction between authentication and model inference.
 
 The app never starts a capture or discovery scan automatically. It does not block devices, change router rules, automatically send network data to AI, request API keys, or fall back to paid API inference.
 

@@ -30,7 +30,7 @@ pub const TSHARK_FIELDS: [&str; 14] = [
 ];
 
 pub fn tshark_command() -> Command {
-    let mut command = Command::new("tshark");
+    let mut command = tool_command("tshark");
     command.args(["-n", "-l", "-T", "fields", "-E", "occurrence=f"]);
     for field in TSHARK_FIELDS {
         command.args(["-e", field]);
@@ -120,7 +120,20 @@ impl Drop for ChildGuard {
     }
 }
 
-fn bounded_output(command: &mut Command, limit: usize, timeout: Duration) -> Result<Vec<u8>> {
+pub fn bounded_output(command: &mut Command, limit: usize, timeout: Duration) -> Result<Vec<u8>> {
+    bounded_output_cancellable(
+        command,
+        limit,
+        timeout,
+        &std::sync::atomic::AtomicBool::new(false),
+    )
+}
+pub fn bounded_output_cancellable(
+    command: &mut Command,
+    limit: usize,
+    timeout: Duration,
+    cancel: &std::sync::atomic::AtomicBool,
+) -> Result<Vec<u8>> {
     let mut child = ChildGuard(
         command
             .stdout(Stdio::piped())
@@ -149,9 +162,19 @@ fn bounded_output(command: &mut Command, limit: usize, timeout: Duration) -> Res
     let mut output = Vec::new();
     let mut diagnostics = Vec::new();
     for _ in 0..2 {
-        let (is_error, cap, result) = rx
-            .recv_timeout(deadline.saturating_duration_since(Instant::now()))
-            .context("Tool timed out while reading output")?;
+        let (is_error, cap, result) = loop {
+            if cancel.load(std::sync::atomic::Ordering::Relaxed) {
+                bail!("Collection cancelled");
+            }
+            if Instant::now() >= deadline {
+                bail!("Tool timed out while reading output");
+            }
+            match rx.recv_timeout(Duration::from_millis(50)) {
+                Ok(value) => break value,
+                Err(mpsc::RecvTimeoutError::Timeout) => {}
+                Err(_) => bail!("Tool output stream closed"),
+            }
+        };
         let bytes = result?;
         if bytes.len() > cap {
             bail!("Tool output exceeds import limit");
@@ -163,6 +186,9 @@ fn bounded_output(command: &mut Command, limit: usize, timeout: Duration) -> Res
         }
     }
     loop {
+        if cancel.load(std::sync::atomic::Ordering::Relaxed) {
+            bail!("Collection cancelled");
+        }
         if let Some(status) = child.0.try_wait()? {
             if !status.success() {
                 bail!(
@@ -290,6 +316,12 @@ pub fn parse_nmap(xml: &str) -> Result<Vec<DiscoveredDevice>> {
 }
 
 pub fn discover(cidr: &str) -> Result<Vec<DiscoveredDevice>> {
+    discover_cancellable(cidr, &std::sync::atomic::AtomicBool::new(false))
+}
+pub fn discover_cancellable(
+    cidr: &str,
+    cancel: &std::sync::atomic::AtomicBool,
+) -> Result<Vec<DiscoveredDevice>> {
     let nets = networks(cidr)?;
     if nets.len() != 1 {
         bail!("Discover one explicitly selected IPv4 network at a time");
@@ -298,7 +330,7 @@ pub fn discover(cidr: &str) -> Result<Vec<DiscoveredDevice>> {
         ipnet::IpNet::V4(net) if net.prefix_len() >= 24 && net.network().is_private() => {}
         _ => bail!("Discovery is limited to private IPv4 networks of /24 or smaller"),
     }
-    let mut command = Command::new("nmap");
+    let mut command = tool_command("nmap");
     command.args([
         "-sn",
         "-n",
@@ -310,14 +342,40 @@ pub fn discover(cidr: &str) -> Result<Vec<DiscoveredDevice>> {
         "-",
         cidr,
     ]);
-    let output = bounded_output(&mut command, 16 * 1024 * 1024, Duration::from_secs(300))
-        .context("Discovery requires separately installed Nmap")?;
+    let output = bounded_output_cancellable(
+        &mut command,
+        16 * 1024 * 1024,
+        Duration::from_secs(300),
+        cancel,
+    )
+    .context("Discovery requires separately installed Nmap")?;
     parse_nmap(&String::from_utf8(output)?)
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    #[cfg(unix)]
+    fn cancelling_a_tool_stops_it_promptly() {
+        let cancel = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+        let signal = cancel.clone();
+        let worker = std::thread::spawn(move || {
+            std::thread::sleep(Duration::from_millis(50));
+            signal.store(true, std::sync::atomic::Ordering::Relaxed);
+        });
+        let start = Instant::now();
+        let result = bounded_output_cancellable(
+            Command::new("sleep").arg("30"),
+            1024,
+            Duration::from_secs(60),
+            &cancel,
+        );
+        assert!(result.unwrap_err().to_string().contains("cancelled"));
+        assert!(start.elapsed() < Duration::from_secs(2));
+        worker.join().unwrap();
+    }
+
     #[test]
     #[cfg(unix)]
     fn external_tool_output_and_runtime_are_bounded() {
