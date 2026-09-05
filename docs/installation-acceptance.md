@@ -27,3 +27,11 @@ Record OS, architecture, app commit, tool versions, each observed result, and an
 7. Run controlled WAN and between-device transfers from a known topology. Compare capture totals and packet drops against the generating endpoints; do not mark whole-network coverage verified without this evidence.
 
 Current gate: no Developer ID Application identity was available on the development Mac during the September 2026 reliability update. Physical Windows GUI/driver and fresh-machine Homebrew bootstrap acceptance remain pending. Unit tests exercise installer routing and resumption; CI builds exercise both desktop targets.
+
+## Rechecked during live home validation
+
+The September 5, 2026 live-host validation rechecked the available signing identities and ran the release verifier against the rebuilt native Mac app. Only Apple Development identities were available; the verifier correctly rejected the ad-hoc application as unsuitable for direct signed distribution. No certificate was created or changed, and no installer was published.
+
+A complete binary notice inventory also remains an explicit release gate. Declared package licenses in a lockfile are not the complete copyright notices and license texts owed by an actual distributed artifact. Audit the resolved dependencies for each release target, collect their required notices (including native/bundled transitive components), include the resulting notice material with the artifact, and review the exact bundle contents. Nmap, TShark, Npcap, and provider clients remain separately installed tools; do not add their binaries to the application as a shortcut.
+
+Issue #3 must remain open pending maintainer-controlled distribution signing, notarization, the complete artifact notice review, and physical Windows/fresh-machine installation and uninstall acceptance. Successful local launch and the negative unsigned-artifact check do not close it.
