@@ -102,7 +102,17 @@ export function buildSummary(
     device: redact ? 'selected-device' : device.name,
     deviceDetails: {
       evidence: 'D1',
-      identityFieldObservedAt: device.details?.fieldObservedAt || {},
+      identityFieldObservedAt: Object.fromEntries(
+        Object.entries(device.details?.fieldObservedAt || {}).filter(
+          ([field, timestamp]) =>
+            ['hostname', 'vendor', 'model', 'operatingSystem'].includes(
+              field,
+            ) &&
+            Number.isInteger(timestamp) &&
+            timestamp >= 0 &&
+            timestamp <= 253402300799,
+        ),
+      ),
       discoveryObservedAt: device.details?.observedAt
         ? date(device.details.observedAt)
         : 'Not available',
