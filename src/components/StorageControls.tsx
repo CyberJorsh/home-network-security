@@ -10,6 +10,8 @@ export default function StorageControls({
   const [limit, setLimit] = useState(100000);
   const [busy, setBusy] = useState(false);
   const [notice, setNotice] = useState('');
+  const [confirming, setConfirming] = useState(false);
+  const [confirmation, setConfirmation] = useState('');
   useEffect(() => {
     let alive = true;
     if (native)
@@ -30,7 +32,11 @@ export default function StorageControls({
     try {
       const result = await command(
         action,
-        action === 'set_storage_limit' ? { limit } : undefined,
+        action === 'set_storage_limit'
+          ? { limit }
+          : action === 'clear_local_data'
+            ? { confirmation }
+            : undefined,
       );
       if (result !== false) {
         setNotice(
@@ -40,7 +46,11 @@ export default function StorageControls({
               ? 'Local data exported.'
               : 'Local data deleted.',
         );
-        if (action === 'clear_local_data') onChanged();
+        if (action === 'clear_local_data') {
+          setConfirming(false);
+          setConfirmation('');
+          onChanged();
+        }
       }
     } catch (e) {
       onError(String(e));
@@ -89,7 +99,10 @@ export default function StorageControls({
         <button
           className="link-button"
           disabled={!native || busy}
-          onClick={() => void act('clear_local_data')}
+          onClick={() => {
+            setConfirming(true);
+            setConfirmation('');
+          }}
         >
           Delete local data…
         </button>
@@ -99,6 +112,48 @@ export default function StorageControls({
         Store them privately. Deleting local data does not sign out providers or
         delete remote collector data.
       </p>
+      {confirming && (
+        <section
+          className="integration-status"
+          aria-label="Confirm local data deletion"
+        >
+          <h3>Delete this computer’s local data?</h3>
+          <p>
+            This permanently removes local observations, device names, alerts
+            and saved explanations, including when you are viewing a sample.
+            Export first to keep a copy.
+          </p>
+          <label htmlFor="delete-confirmation">
+            Type DELETE LOCAL DATA to confirm
+          </label>
+          <input
+            id="delete-confirmation"
+            autoComplete="off"
+            value={confirmation}
+            disabled={busy}
+            onChange={(e) => setConfirmation(e.target.value)}
+          />
+          <div className="button-row">
+            <button
+              className="button secondary"
+              disabled={busy}
+              onClick={() => {
+                setConfirming(false);
+                setConfirmation('');
+              }}
+            >
+              Cancel deletion
+            </button>
+            <button
+              className="button primary"
+              disabled={busy || confirmation !== 'DELETE LOCAL DATA'}
+              onClick={() => void act('clear_local_data')}
+            >
+              Permanently delete local data
+            </button>
+          </div>
+        </section>
+      )}
       {notice && <p role="status">{notice}</p>}
     </details>
   );

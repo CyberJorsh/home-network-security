@@ -56,9 +56,9 @@ it('saves only on an explicit click and reloads the exact saved summary', async 
   );
   await screen.findByText('No saved explanations.');
 });
-it('does not report deletion or reset the view if native confirmation is cancelled', async () => {
+it('does not invoke deletion when opening or cancelling the confirmation', async () => {
   vi.mocked(command).mockImplementation(async (name) =>
-    name === 'storage_limit' ? 100000 : false,
+    name === 'storage_limit' ? 100000 : true,
   );
   const changed = vi.fn();
   const user = userEvent.setup();
@@ -72,11 +72,52 @@ it('does not report deletion or reset the view if native confirmation is cancell
   );
   await user.click(screen.getByText('Local history and storage'));
   await user.click(screen.getByRole('button', { name: 'Delete local data…' }));
-  await waitFor(() =>
-    expect(
-      vi.mocked(command).mock.calls.some(([n]) => n === 'clear_local_data'),
-    ).toBe(true),
+  const button = screen.getByRole('button', {
+    name: 'Permanently delete local data',
+  }) as HTMLButtonElement;
+  expect(button.disabled).toBe(true);
+  await user.type(
+    screen.getByLabelText('Type DELETE LOCAL DATA to confirm'),
+    'DELETE',
   );
+  expect(button.disabled).toBe(true);
+  expect(
+    vi.mocked(command).mock.calls.some(([n]) => n === 'clear_local_data'),
+  ).toBe(false);
+  await user.click(screen.getByRole('button', { name: 'Cancel deletion' }));
+  expect(
+    screen.queryByRole('region', { name: 'Confirm local data deletion' }),
+  ).toBeNull();
   expect(changed).not.toHaveBeenCalled();
-  expect(screen.queryByText('Local data deleted.')).toBeNull();
+});
+it('passes exact typed confirmation only on the final delete click', async () => {
+  vi.mocked(command).mockImplementation(async (name) =>
+    name === 'storage_limit' ? 100000 : true,
+  );
+  const changed = vi.fn();
+  const user = userEvent.setup();
+  render(
+    <StorageControls
+      onChanged={changed}
+      onError={(e) => {
+        throw new Error(e);
+      }}
+    />,
+  );
+  await user.click(screen.getByText('Local history and storage'));
+  await user.click(screen.getByRole('button', { name: 'Delete local data…' }));
+  await user.type(
+    screen.getByLabelText('Type DELETE LOCAL DATA to confirm'),
+    'DELETE LOCAL DATA',
+  );
+  expect(
+    vi.mocked(command).mock.calls.some(([n]) => n === 'clear_local_data'),
+  ).toBe(false);
+  await user.click(
+    screen.getByRole('button', { name: 'Permanently delete local data' }),
+  );
+  await waitFor(() => expect(changed).toHaveBeenCalledTimes(1));
+  expect(
+    vi.mocked(command).mock.calls.find(([n]) => n === 'clear_local_data')?.[1],
+  ).toEqual({ confirmation: 'DELETE LOCAL DATA' });
 });

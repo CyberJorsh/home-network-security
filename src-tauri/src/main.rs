@@ -470,18 +470,51 @@ async fn export_local_data(state: State<'_, Arc<AppState>>) -> CmdResult<bool> {
     .await
     .map_err(error)?
 }
+fn validate_deletion_confirmation(confirmation: &str) -> CmdResult<()> {
+    if confirmation != "DELETE LOCAL DATA" {
+        return Err("Type DELETE LOCAL DATA before deleting local observations".into());
+    }
+    Ok(())
+}
 #[tauri::command]
-async fn clear_local_data(state: State<'_, Arc<AppState>>) -> CmdResult<bool> {
+async fn clear_local_data(
+    state: State<'_, Arc<AppState>>,
+    confirmation: String,
+) -> CmdResult<bool> {
+    validate_deletion_confirmation(&confirmation)?;
     let state = state.inner().clone();
     tauri::async_runtime::spawn_blocking(move || {
-        if state.collection.job.lock().map_err(error)?.running {return Err("Stop collection before deleting local data".into());}
-        let confirmed=rfd::MessageDialog::new().set_title("Delete local observations?").set_description("Delete this computer's observations, device names, alerts, and saved explanations? Export first if you need a copy. Provider sign-ins and remote collectors are kept.").set_buttons(rfd::MessageButtons::YesNo).show();
-        if confirmed != rfd::MessageDialogResult::Yes {return Ok(false);}
-        let job=state.collection.job.lock().map_err(error)?;
-        if job.running {return Err("Stop collection before deleting local data".into());}
-        state.local.lock().map_err(error)?.clear_local_data().map_err(error)?;
+        let job = state.collection.job.lock().map_err(error)?;
+        if job.running {
+            return Err("Stop collection before deleting local data".into());
+        }
+        state
+            .local
+            .lock()
+            .map_err(error)?
+            .clear_local_data()
+            .map_err(error)?;
         Ok(true)
-    }).await.map_err(error)?
+    })
+    .await
+    .map_err(error)?
+}
+#[cfg(test)]
+mod deletion_tests {
+    use super::*;
+    #[test]
+    fn deletion_requires_explicit_exact_confirmation() {
+        for text in [
+            "",
+            "yes",
+            "DELETE",
+            "delete local data",
+            "DELETE LOCAL DATA ",
+        ] {
+            assert!(validate_deletion_confirmation(text).is_err());
+        }
+        assert!(validate_deletion_confirmation("DELETE LOCAL DATA").is_ok());
+    }
 }
 #[tauri::command]
 fn explanation_history(state: State<'_, Arc<AppState>>) -> CmdResult<Vec<serde_json::Value>> {
