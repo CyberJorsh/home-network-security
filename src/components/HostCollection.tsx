@@ -11,6 +11,7 @@ type Host = {
   platform: string;
 };
 type Job = {
+  warning?: string | null;
   running: boolean;
   kind: string;
   count: number;
@@ -345,6 +346,7 @@ export default function HostCollection({
               ? ' Discovery can take up to five minutes.'
               : ''}
           </p>
+          {job.warning && <p>{job.warning}</p>}
           {job.error && (
             <p role="alert" className="tool-output">
               {job.error}

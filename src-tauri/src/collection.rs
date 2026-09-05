@@ -12,6 +12,7 @@ use std::{
 #[derive(Clone, Default, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Job {
+    pub warning: Option<String>,
     pub running: bool,
     pub kind: String,
     pub count: usize,
@@ -188,6 +189,16 @@ impl Collection {
                         crate::host_identity::enrich(&mut found, &cancel);
                     }
                     anyhow::ensure!(!cancel.load(Ordering::Relaxed), "Collection cancelled");
+                    if found.iter().any(|d| {
+                        d.details
+                            .source
+                            .as_deref()
+                            .is_some_and(|s| s.contains("service inspection incomplete"))
+                    }) {
+                        if let Ok(mut job) = status.lock() {
+                            job.warning = Some("Some service inspections did not finish. Confirmed discovery responses were kept; missing service details do not mean no services are running.".into());
+                        }
+                    }
                     store.save_discovery(&id, &found)?;
                     Ok(found.len())
                 } else {
