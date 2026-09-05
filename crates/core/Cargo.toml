@@ -1,0 +1,19 @@
+[package]
+name = "hns-core"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+anyhow.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+chrono.workspace = true
+uuid.workspace = true
+rusqlite = { version = "0.38", features = ["bundled"] }
+ipnet = "2"
+sha2 = "0.10"
+quick-xml = { version = "0.39", features = ["serialize"] }
+
+[dev-dependencies]
+tempfile = "3"

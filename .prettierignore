@@ -1,0 +1,12 @@
+node_modules
+dist
+target
+.local
+.data
+PROJECT_BRIEF.md
+Cargo.lock
+package-lock.json
+fixtures
+public/sample.json
+src-tauri/icons
+src-tauri/gen

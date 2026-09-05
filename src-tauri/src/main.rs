@@ -1,0 +1,253 @@
+#![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
+use hns_core::*;
+use serde::Deserialize;
+use std::{io::Read, sync::Mutex};
+use tauri::{Manager, State};
+
+struct AppState {
+    local: Mutex<Store>,
+    demo: Mutex<Store>,
+    remote: Mutex<Option<Remote>>,
+}
+#[derive(Clone, Deserialize)]
+struct Remote {
+    port: u16,
+    token: String,
+}
+type CmdResult<T> = Result<T, String>;
+fn error(e: impl std::fmt::Display) -> String {
+    e.to_string()
+}
+
+fn remote_request(
+    remote: &Remote,
+    path: &str,
+    body: Option<serde_json::Value>,
+) -> CmdResult<serde_json::Value> {
+    let client = reqwest::blocking::Client::builder()
+        .timeout(std::time::Duration::from_secs(10))
+        .redirect(reqwest::redirect::Policy::none())
+        .no_proxy()
+        .build()
+        .map_err(error)?;
+    let url = format!("http://127.0.0.1:{}{path}", remote.port);
+    let request = if let Some(body) = body {
+        client.post(url).json(&body)
+    } else {
+        client.get(url)
+    };
+    let response = request.bearer_auth(&remote.token).send().map_err(error)?;
+    let status = response.status();
+    let mut bytes = Vec::new();
+    std::io::Read::take(response, 32 * 1024 * 1024 + 1)
+        .read_to_end(&mut bytes)
+        .map_err(error)?;
+    if bytes.len() > 32 * 1024 * 1024 {
+        return Err("Collector response exceeds 32 MiB".into());
+    }
+    let value: serde_json::Value = serde_json::from_slice(&bytes).map_err(error)?;
+    if !status.is_success() {
+        return Err(value["error"]
+            .as_str()
+            .unwrap_or("Collector request failed")
+            .into());
+    }
+    Ok(value)
+}
+
+#[tauri::command(async)]
+fn snapshot(state: State<AppState>, mode: String, sensor: Option<String>) -> CmdResult<Snapshot> {
+    if mode == "demo" {
+        return state
+            .demo
+            .lock()
+            .map_err(error)?
+            .snapshot(sensor.as_deref(), "demo")
+            .map_err(error);
+    }
+    if let Some(remote) = state.remote.lock().map_err(error)?.clone() {
+        let path = if let Some(sensor) = sensor {
+            identifier(&sensor).map_err(error)?;
+            format!("/v1/snapshot?sensor={sensor}")
+        } else {
+            "/v1/snapshot".into()
+        };
+        return serde_json::from_value(remote_request(&remote, &path, None)?).map_err(error);
+    }
+    state
+        .local
+        .lock()
+        .map_err(error)?
+        .snapshot(sensor.as_deref(), "local")
+        .map_err(error)
+}
+#[tauri::command(async)]
+fn rename_device(state: State<AppState>, mode: String, id: String, name: String) -> CmdResult<()> {
+    if mode == "demo" {
+        return state
+            .demo
+            .lock()
+            .map_err(error)?
+            .rename(&id, &name)
+            .map_err(error);
+    }
+    if let Some(remote) = state.remote.lock().map_err(error)?.clone() {
+        remote_request(
+            &remote,
+            "/v1/rename",
+            Some(serde_json::json!({"id":id,"name":name})),
+        )?;
+        return Ok(());
+    }
+    state
+        .local
+        .lock()
+        .map_err(error)?
+        .rename(&id, &name)
+        .map_err(error)
+}
+#[tauri::command(async)]
+fn acknowledge_alert(state: State<AppState>, mode: String, id: String) -> CmdResult<()> {
+    if mode == "demo" {
+        return state
+            .demo
+            .lock()
+            .map_err(error)?
+            .acknowledge(&id)
+            .map_err(error);
+    }
+    if let Some(remote) = state.remote.lock().map_err(error)?.clone() {
+        remote_request(
+            &remote,
+            "/v1/acknowledge",
+            Some(serde_json::json!({"id":id})),
+        )?;
+        return Ok(());
+    }
+    state
+        .local
+        .lock()
+        .map_err(error)?
+        .acknowledge(&id)
+        .map_err(error)
+}
+#[tauri::command(async)]
+fn connect_collector(state: State<AppState>, port: u16, token: String) -> CmdResult<()> {
+    if token.trim().len() < 32 {
+        return Err("Enter the collector token (at least 32 characters)".into());
+    }
+    let remote = Remote {
+        port,
+        token: token.trim().into(),
+    };
+    let _: Snapshot =
+        serde_json::from_value(remote_request(&remote, "/v1/snapshot", None)?).map_err(error)?;
+    *state.remote.lock().map_err(error)? = Some(remote);
+    Ok(())
+}
+#[tauri::command(async)]
+fn disconnect_collector(state: State<AppState>) -> CmdResult<()> {
+    *state.remote.lock().map_err(error)? = None;
+    Ok(())
+}
+#[tauri::command(async)]
+fn configure_networks(state: State<AppState>, cidrs: String) -> CmdResult<()> {
+    state
+        .local
+        .lock()
+        .map_err(error)?
+        .set_networks(&cidrs)
+        .map_err(error)
+}
+#[tauri::command(async)]
+fn import_file(state: State<AppState>) -> CmdResult<Option<usize>> {
+    let Some(file) = rfd::FileDialog::new()
+        .add_filter("Network observations", &["ndjson", "pcap", "pcapng", "xml"])
+        .pick_file()
+    else {
+        return Ok(None);
+    };
+    let sensor_id = if file.extension().is_some_and(|e| e == "xml") {
+        "discovery"
+    } else {
+        "import"
+    };
+    let mut store = state.local.lock().map_err(error)?;
+    if !store
+        .sensors()
+        .map_err(error)?
+        .iter()
+        .any(|s| s.id == sensor_id)
+    {
+        store
+            .set_sensor(&Sensor::new(sensor_id, "file"))
+            .map_err(error)?;
+    }
+    let n = match file.extension().and_then(|s| s.to_str()) {
+        Some("pcap" | "pcapng") => import_pcap(&mut store, &file, sensor_id).map_err(error)?,
+        Some("xml") => {
+            if std::fs::metadata(&file).map_err(error)?.len() > 16 * 1024 * 1024 {
+                return Err("XML import exceeds 16 MiB".into());
+            }
+            let found =
+                parse_nmap(&std::fs::read_to_string(file).map_err(error)?).map_err(error)?;
+            store.save_discovery(sensor_id, &found).map_err(error)?;
+            found.len()
+        }
+        Some("ndjson") => {
+            if std::fs::metadata(&file).map_err(error)?.len() > 32 * 1024 * 1024 {
+                return Err("Import exceeds 32 MiB".into());
+            }
+            store
+                .import_json(&std::fs::read_to_string(file).map_err(error)?, sensor_id)
+                .map_err(error)?
+        }
+        _ => return Err("Unsupported file type".into()),
+    };
+    *state.remote.lock().map_err(error)? = None;
+    Ok(Some(n))
+}
+#[tauri::command(async)]
+fn open_provider(provider: String) -> CmdResult<()> {
+    let url = match provider.as_str() {
+        "chatgpt" => "https://chatgpt.com/",
+        "grok" => "https://grok.com/",
+        _ => return Err("Unknown provider".into()),
+    };
+    #[cfg(target_os = "macos")]
+    let status = std::process::Command::new("open").arg(url).status();
+    #[cfg(target_os = "windows")]
+    let status = std::process::Command::new("rundll32")
+        .args(["url.dll,FileProtocolHandler", url])
+        .status();
+    #[cfg(target_os = "linux")]
+    let status = std::process::Command::new("xdg-open").arg(url).status();
+    if !status.map_err(error)?.success() {
+        return Err("Could not open the provider website".into());
+    }
+    Ok(())
+}
+fn main() {
+    tauri::Builder::default()
+        .setup(|app| {
+            let path = app.path().app_local_data_dir()?.join("network.db");
+            app.manage(AppState {
+                local: Mutex::new(Store::open(&path)?),
+                demo: Mutex::new(demo_store()?),
+                remote: Mutex::new(None),
+            });
+            Ok(())
+        })
+        .invoke_handler(tauri::generate_handler![
+            snapshot,
+            rename_device,
+            acknowledge_alert,
+            connect_collector,
+            disconnect_collector,
+            configure_networks,
+            import_file,
+            open_provider
+        ])
+        .run(tauri::generate_context!())
+        .expect("Unable to start Home Network Security");
+}

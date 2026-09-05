@@ -1,0 +1,461 @@
+{
+  "mode": "demo",
+  "sensors": [
+    {
+      "id": "sample",
+      "name": "Sample home",
+      "kind": "demo",
+      "interface": "",
+      "internetCoverage": "unverified",
+      "lanCoverage": "unverified",
+      "notes": "Entirely synthetic fixture. It does not describe your network.",
+      "lastSeen": 1788477550,
+      "status": "sample",
+      "droppedPackets": null
+    }
+  ],
+  "selectedSensor": "sample",
+  "devices": [
+    {
+      "id": "sample:02:00:00:00:00:11:10.42.0.11",
+      "name": "Living room TV",
+      "addresses": [
+        "10.42.0.11"
+      ],
+      "mac": "02:00:00:00:00:11",
+      "category": "Unknown",
+      "identification": "Named by you",
+      "firstSeen": 1788470400,
+      "lastSeen": 1788477540,
+      "upload": 0,
+      "download": 21510000,
+      "localBytes": 0,
+      "connections": 1
+    },
+    {
+      "id": "sample:02:00:00:00:00:12:10.42.0.12",
+      "name": "Work laptop",
+      "addresses": [
+        "10.42.0.12"
+      ],
+      "mac": "02:00:00:00:00:12",
+      "category": "Unknown",
+      "identification": "Named by you",
+      "firstSeen": 1788470401,
+      "lastSeen": 1788477541,
+      "upload": 25980000,
+      "download": 0,
+      "localBytes": 0,
+      "connections": 1
+    },
+    {
+      "id": "sample:02:00:00:00:00:13:10.42.0.13",
+      "name": "Kitchen speaker",
+      "addresses": [
+        "10.42.0.13"
+      ],
+      "mac": "02:00:00:00:00:13",
+      "category": "Unknown",
+      "identification": "Named by you",
+      "firstSeen": 1788470402,
+      "lastSeen": 1788477542,
+      "upload": 0,
+      "download": 2868000,
+      "localBytes": 0,
+      "connections": 1
+    },
+    {
+      "id": "sample:02:00:00:00:00:14:10.42.0.14",
+      "name": "Home server",
+      "addresses": [
+        "10.42.0.14"
+      ],
+      "mac": "02:00:00:00:00:14",
+      "category": "Unknown",
+      "identification": "Named by you",
+      "firstSeen": 1788470403,
+      "lastSeen": 1788477550,
+      "upload": 0,
+      "download": 2868000,
+      "localBytes": 29280000,
+      "connections": 2
+    },
+    {
+      "id": "sample:02:00:00:00:00:15:10.42.0.15",
+      "name": "Front door camera",
+      "addresses": [
+        "10.42.0.15"
+      ],
+      "mac": "02:00:00:00:00:15",
+      "category": "Unknown",
+      "identification": "Named by you",
+      "firstSeen": 1788470404,
+      "lastSeen": 1788477550,
+      "upload": 2868000,
+      "download": 0,
+      "localBytes": 29280000,
+      "connections": 2
+    },
+    {
+      "id": "sample:02:00:00:00:00:16:10.42.0.16",
+      "name": "Personal phone",
+      "addresses": [
+        "10.42.0.16"
+      ],
+      "mac": "02:00:00:00:00:16",
+      "category": "Unknown",
+      "identification": "Named by you",
+      "firstSeen": 1788470405,
+      "lastSeen": 1788477545,
+      "upload": 0,
+      "download": 2868000,
+      "localBytes": 0,
+      "connections": 1
+    }
+  ],
+  "conversations": [
+    {
+      "id": "flow-d429c3ca4d813d4e1c3be570558c94f32ff28672a073c853d00f422ec9fef150",
+      "src": "10.42.0.15",
+      "dst": "10.42.0.14",
+      "srcDevice": "sample:02:00:00:00:00:15:10.42.0.15",
+      "dstDevice": "sample:02:00:00:00:00:14:10.42.0.14",
+      "port": 61000,
+      "protocol": "TCP",
+      "direction": "local",
+      "bytes": 29280000,
+      "packets": 21600,
+      "firstSeen": 1788470410,
+      "lastSeen": 1788477550,
+      "sensorId": "sample"
+    },
+    {
+      "id": "flow-8a66f3c24b606f12ec7097f989efbeb9590972fce9ff607dcaafd295a1cf446b",
+      "src": "10.42.0.12",
+      "dst": "203.0.113.21",
+      "srcDevice": "sample:02:00:00:00:00:12:10.42.0.12",
+      "dstDevice": null,
+      "port": 443,
+      "protocol": "TLS",
+      "direction": "upload",
+      "bytes": 25980000,
+      "packets": 2840,
+      "firstSeen": 1788470401,
+      "lastSeen": 1788477541,
+      "sensorId": "sample"
+    },
+    {
+      "id": "flow-f2e4e4a39765e6f7bc21e392c08bc5222175ce136c90d3ab893417031aa5bfb8",
+      "src": "203.0.113.20",
+      "dst": "10.42.0.11",
+      "srcDevice": null,
+      "dstDevice": "sample:02:00:00:00:00:11:10.42.0.11",
+      "port": 51000,
+      "protocol": "TLS",
+      "direction": "download",
+      "bytes": 21510000,
+      "packets": 21468,
+      "firstSeen": 1788470400,
+      "lastSeen": 1788477540,
+      "sensorId": "sample"
+    },
+    {
+      "id": "flow-8c3acd1f8b46930ed10be33a93d910c7cf03cdf1262888acaafceea20fe3caf8",
+      "src": "10.42.0.15",
+      "dst": "203.0.113.24",
+      "srcDevice": "sample:02:00:00:00:00:15:10.42.0.15",
+      "dstDevice": null,
+      "port": 443,
+      "protocol": "TLS",
+      "direction": "upload",
+      "bytes": 2868000,
+      "packets": 2840,
+      "firstSeen": 1788470404,
+      "lastSeen": 1788477544,
+      "sensorId": "sample"
+    },
+    {
+      "id": "flow-def9c8eb4a5ba283fc19e7c381e4efd36a339510254febe51378ba8a18d7e079",
+      "src": "203.0.113.22",
+      "dst": "10.42.0.13",
+      "srcDevice": null,
+      "dstDevice": "sample:02:00:00:00:00:13:10.42.0.13",
+      "port": 51002,
+      "protocol": "TLS",
+      "direction": "download",
+      "bytes": 2868000,
+      "packets": 2840,
+      "firstSeen": 1788470402,
+      "lastSeen": 1788477542,
+      "sensorId": "sample"
+    },
+    {
+      "id": "flow-482e8c332d32dcb4cdea90b5c1e1cd7a2155fab65eebdb061a7ae9c078ad2b99",
+      "src": "203.0.113.23",
+      "dst": "10.42.0.14",
+      "srcDevice": null,
+      "dstDevice": "sample:02:00:00:00:00:14:10.42.0.14",
+      "port": 51003,
+      "protocol": "TLS",
+      "direction": "download",
+      "bytes": 2868000,
+      "packets": 2840,
+      "firstSeen": 1788470403,
+      "lastSeen": 1788477543,
+      "sensorId": "sample"
+    },
+    {
+      "id": "flow-302992e25d49ee5727f7598c985b51cecbbfc1a8708f19f3121c7f0f35248e14",
+      "src": "203.0.113.25",
+      "dst": "10.42.0.16",
+      "srcDevice": null,
+      "dstDevice": "sample:02:00:00:00:00:16:10.42.0.16",
+      "port": 51005,
+      "protocol": "TLS",
+      "direction": "download",
+      "bytes": 2868000,
+      "packets": 2840,
+      "firstSeen": 1788470405,
+      "lastSeen": 1788477545,
+      "sensorId": "sample"
+    }
+  ],
+  "alerts": [
+    {
+      "id": "device:sample:02:00:00:00:00:16:10.42.0.16",
+      "deviceId": "sample:02:00:00:00:00:16:10.42.0.16",
+      "severity": "info",
+      "title": "Device observed",
+      "detail": "This device appears in retained observations. This does not establish when it joined your network or whether it is trusted.",
+      "evidence": [
+        "flow-302992e25d49ee5727f7598c985b51cecbbfc1a8708f19f3121c7f0f35248e14"
+      ],
+      "timestamp": 1788470405,
+      "acknowledged": false
+    },
+    {
+      "id": "device:sample:02:00:00:00:00:15:10.42.0.15",
+      "deviceId": "sample:02:00:00:00:00:15:10.42.0.15",
+      "severity": "info",
+      "title": "Device observed",
+      "detail": "This device appears in retained observations. This does not establish when it joined your network or whether it is trusted.",
+      "evidence": [
+        "flow-8c3acd1f8b46930ed10be33a93d910c7cf03cdf1262888acaafceea20fe3caf8",
+        "flow-d429c3ca4d813d4e1c3be570558c94f32ff28672a073c853d00f422ec9fef150"
+      ],
+      "timestamp": 1788470404,
+      "acknowledged": false
+    },
+    {
+      "id": "device:sample:02:00:00:00:00:14:10.42.0.14",
+      "deviceId": "sample:02:00:00:00:00:14:10.42.0.14",
+      "severity": "info",
+      "title": "Device observed",
+      "detail": "This device appears in retained observations. This does not establish when it joined your network or whether it is trusted.",
+      "evidence": [
+        "flow-d429c3ca4d813d4e1c3be570558c94f32ff28672a073c853d00f422ec9fef150",
+        "flow-482e8c332d32dcb4cdea90b5c1e1cd7a2155fab65eebdb061a7ae9c078ad2b99"
+      ],
+      "timestamp": 1788470403,
+      "acknowledged": false
+    },
+    {
+      "id": "device:sample:02:00:00:00:00:13:10.42.0.13",
+      "deviceId": "sample:02:00:00:00:00:13:10.42.0.13",
+      "severity": "info",
+      "title": "Device observed",
+      "detail": "This device appears in retained observations. This does not establish when it joined your network or whether it is trusted.",
+      "evidence": [
+        "flow-def9c8eb4a5ba283fc19e7c381e4efd36a339510254febe51378ba8a18d7e079"
+      ],
+      "timestamp": 1788470402,
+      "acknowledged": false
+    },
+    {
+      "id": "device:sample:02:00:00:00:00:12:10.42.0.12",
+      "deviceId": "sample:02:00:00:00:00:12:10.42.0.12",
+      "severity": "info",
+      "title": "Device observed",
+      "detail": "This device appears in retained observations. This does not establish when it joined your network or whether it is trusted.",
+      "evidence": [
+        "flow-8a66f3c24b606f12ec7097f989efbeb9590972fce9ff607dcaafd295a1cf446b"
+      ],
+      "timestamp": 1788470401,
+      "acknowledged": false
+    },
+    {
+      "id": "device:sample:02:00:00:00:00:11:10.42.0.11",
+      "deviceId": "sample:02:00:00:00:00:11:10.42.0.11",
+      "severity": "info",
+      "title": "Device observed",
+      "detail": "This device appears in retained observations. This does not establish when it joined your network or whether it is trusted.",
+      "evidence": [
+        "flow-f2e4e4a39765e6f7bc21e392c08bc5222175ce136c90d3ab893417031aa5bfb8"
+      ],
+      "timestamp": 1788470400,
+      "acknowledged": false
+    }
+  ],
+  "timeline": [
+    {
+      "timestamp": 1788470400,
+      "upload": 150000,
+      "download": 787500,
+      "localBytes": 910000
+    },
+    {
+      "timestamp": 1788470700,
+      "upload": 225000,
+      "download": 1181250,
+      "localBytes": 1310000
+    },
+    {
+      "timestamp": 1788471000,
+      "upload": 300000,
+      "download": 1575000,
+      "localBytes": 1294000
+    },
+    {
+      "timestamp": 1788471300,
+      "upload": 222000,
+      "download": 1165500,
+      "localBytes": 1070000
+    },
+    {
+      "timestamp": 1788471600,
+      "upload": 195000,
+      "download": 1023750,
+      "localBytes": 1470000
+    },
+    {
+      "timestamp": 1788471900,
+      "upload": 270000,
+      "download": 1417500,
+      "localBytes": 1038000
+    },
+    {
+      "timestamp": 1788472200,
+      "upload": 294000,
+      "download": 1543500,
+      "localBytes": 1230000
+    },
+    {
+      "timestamp": 1788472500,
+      "upload": 165000,
+      "download": 866250,
+      "localBytes": 1422000
+    },
+    {
+      "timestamp": 1788472800,
+      "upload": 240000,
+      "download": 1260000,
+      "localBytes": 990000
+    },
+    {
+      "timestamp": 1788473100,
+      "upload": 315000,
+      "download": 1653750,
+      "localBytes": 1390000
+    },
+    {
+      "timestamp": 1788473400,
+      "upload": 186000,
+      "download": 976500,
+      "localBytes": 1166000
+    },
+    {
+      "timestamp": 1788473700,
+      "upload": 210000,
+      "download": 1102500,
+      "localBytes": 1150000
+    },
+    {
+      "timestamp": 1788474000,
+      "upload": 285000,
+      "download": 1496250,
+      "localBytes": 1550000
+    },
+    {
+      "timestamp": 1788474300,
+      "upload": 258000,
+      "download": 1354500,
+      "localBytes": 910000
+    },
+    {
+      "timestamp": 1788474600,
+      "upload": 180000,
+      "download": 945000,
+      "localBytes": 1310000
+    },
+    {
+      "timestamp": 1788474900,
+      "upload": 255000,
+      "download": 1338750,
+      "localBytes": 1294000
+    },
+    {
+      "timestamp": 1788475200,
+      "upload": 3570000,
+      "download": 1732500,
+      "localBytes": 1070000
+    },
+    {
+      "timestamp": 1788475500,
+      "upload": 1950000,
+      "download": 787500,
+      "localBytes": 1470000
+    },
+    {
+      "timestamp": 1788475800,
+      "upload": 2925000,
+      "download": 1181250,
+      "localBytes": 1038000
+    },
+    {
+      "timestamp": 1788476100,
+      "upload": 3900000,
+      "download": 1575000,
+      "localBytes": 1230000
+    },
+    {
+      "timestamp": 1788476400,
+      "upload": 2886000,
+      "download": 1165500,
+      "localBytes": 1422000
+    },
+    {
+      "timestamp": 1788476700,
+      "upload": 2535000,
+      "download": 1023750,
+      "localBytes": 990000
+    },
+    {
+      "timestamp": 1788477000,
+      "upload": 3510000,
+      "download": 1417500,
+      "localBytes": 1390000
+    },
+    {
+      "timestamp": 1788477300,
+      "upload": 3822000,
+      "download": 1543500,
+      "localBytes": 1166000
+    }
+  ],
+  "totals": {
+    "upload": 28848000,
+    "download": 30114000,
+    "localBytes": 29280000,
+    "packets": 57268
+  },
+  "networks": [
+    "10.0.0.0/8",
+    "172.16.0.0/12",
+    "192.168.0.0/16",
+    "fc00::/7"
+  ],
+  "observationCount": 840,
+  "retainedCount": 840,
+  "limited": false,
+  "generatedAt": 1788572075
+}

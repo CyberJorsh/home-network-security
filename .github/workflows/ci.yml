@@ -1,0 +1,78 @@
+name: Validate and build
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  core:
+    name: Core, privacy, and real TShark import
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: '22'
+          cache: npm
+      - uses: dtolnay/rust-toolchain@6bed0761d98439e5a578e2877258200ad565ba87
+        with:
+          toolchain: stable
+          components: rustfmt, clippy
+      - run: npm ci
+      - run: npm run format:check
+      - run: npm test
+      - run: npm run build
+      - run: cargo fmt --all --check
+      - run: cargo clippy --locked -p hns-core -p hns-collector --all-targets -- -D warnings
+      - run: cargo test --locked -p hns-core -p hns-collector
+      - run: python3 scripts/smoke_collector.py
+      - name: Install external decoder for synthetic offline test
+        run: sudo apt-get update && sudo DEBIAN_FRONTEND=noninteractive apt-get install -y tshark
+      - run: python3 scripts/smoke_pcap.py
+  desktop:
+    name: Desktop (${{ matrix.os }})
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: macos-latest
+            bundle: app
+            artifact: target/debug/bundle/macos/*.app
+          - os: windows-latest
+            bundle: nsis
+            artifact: target/debug/bundle/nsis/*.exe
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: '22'
+          cache: npm
+      - uses: dtolnay/rust-toolchain@6bed0761d98439e5a578e2877258200ad565ba87
+        with:
+          toolchain: stable
+          components: clippy
+      - run: npm ci
+      - run: npm run build
+      - run: cargo clippy --locked --workspace --all-targets -- -D warnings
+      - run: cargo test --locked --workspace
+      - run: python scripts/smoke_collector.py
+      - run: npm run tauri -- build --debug --bundles ${{ matrix.bundle }}
+      - name: Archive Mac app preserving permissions
+        if: runner.os == 'macOS'
+        run: ditto -c -k --sequesterRsrc --keepParent 'target/debug/bundle/macos/Home Network Security.app' 'target/debug/bundle/Home-Network-Security-macos.zip'
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: unsigned-development-${{ matrix.os }}
+          path: |
+            target/debug/bundle/*.zip
+            target/debug/bundle/nsis/*.exe
+          if-no-files-found: error
+          retention-days: 14
