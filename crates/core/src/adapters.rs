@@ -417,12 +417,73 @@ pub fn discover_with_services(
     let output = bounded_output_cancellable(
         &mut command,
         16 * 1024 * 1024,
-        Duration::from_secs(if services { 180 } else { 300 }),
+        Duration::from_secs(150),
         cancel,
     )
     .context("Discovery requires separately installed Nmap")?;
     let mut found = parse_nmap(&String::from_utf8(output)?)?;
     found.retain(|d| local(&d.ip, &nets));
+    if let ipnet::IpNet::V4(net) = nets[0] {
+        let known: std::collections::HashSet<_> = found.iter().map(|d| d.ip.clone()).collect();
+        let remaining: Vec<_> = net
+            .hosts()
+            .filter(|ip| !known.contains(&ip.to_string()))
+            .collect();
+        // OS ping can send ICMP without requiring Nmap raw-socket privileges.
+        // Bound both concurrency and each child, and stop between small batches.
+        for batch in remaining.chunks(16) {
+            if cancel.load(std::sync::atomic::Ordering::Relaxed) {
+                bail!("Collection cancelled");
+            }
+            if started.elapsed() >= Duration::from_secs(200) {
+                break;
+            }
+            std::thread::scope(|scope| {
+                let workers: Vec<_> = batch
+                    .iter()
+                    .map(|ip| {
+                        scope.spawn(move || {
+                            let mut command = tool_command("ping");
+                            if cfg!(windows) {
+                                command.args(["-n", "1", "-w", "1000"]);
+                            } else if cfg!(target_os = "macos") {
+                                command.args(["-n", "-c", "1", "-W", "1000"]);
+                            } else {
+                                command.args(["-n", "-c", "1", "-W", "1"]);
+                            }
+                            command.arg(ip.to_string());
+                            bounded_output_cancellable(
+                                &mut command,
+                                8192,
+                                Duration::from_secs(2),
+                                cancel,
+                            )
+                            .ok()
+                            .filter(|output| echo_reply(output))
+                            .map(|_| DiscoveredDevice {
+                                ip: ip.to_string(),
+                                mac: None,
+                                hostname: None,
+                                vendor: None,
+                                details: DeviceDetails {
+                                    source: Some("ICMP echo response".into()),
+                                    ..DeviceDetails::default()
+                                },
+                            })
+                        })
+                    })
+                    .collect();
+                for worker in workers {
+                    if let Ok(Some(device)) = worker.join() {
+                        found.push(device);
+                    }
+                }
+            });
+        }
+    }
+    if cancel.load(std::sync::atomic::Ordering::Relaxed) {
+        bail!("Collection cancelled");
+    }
     if !services || found.is_empty() {
         return Ok(found);
     }
@@ -451,6 +512,14 @@ pub fn discover_with_services(
     // A timeout must not erase hosts which already answered discovery. Preserve
     // the response evidence and explicitly label service coverage as incomplete.
     Ok(merge_service_discovery(found, inspected.ok()))
+}
+
+fn echo_reply(output: &[u8]) -> bool {
+    // Windows ping can exit successfully for a destination-unreachable reply.
+    // IPv4 echo replies carry a TTL value; an ICMP error alone is not presence.
+    String::from_utf8_lossy(output)
+        .to_ascii_lowercase()
+        .contains("ttl=")
 }
 
 fn merge_service_discovery(
@@ -487,6 +556,20 @@ fn merge_service_discovery(
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn icmp_errors_do_not_establish_device_presence() {
+        assert!(echo_reply(
+            b"64 bytes from 10.42.0.2: icmp_seq=0 ttl=64 time=1.0 ms"
+        ));
+        assert!(echo_reply(
+            b"Reply from 10.42.0.2: bytes=32 time<1ms TTL=128"
+        ));
+        assert!(!echo_reply(
+            b"Reply from 10.42.0.1: Destination host unreachable."
+        ));
+        assert!(!echo_reply(b"Request timed out."));
+        assert!(!echo_reply(b"TTL expired in transit."));
+    }
     #[test]
     fn service_timeouts_preserve_discovery_and_conflicting_macs_do_not_enrich() {
         let xml = r#"<nmaprun><host><status state="up"/><address addr="10.42.0.2" addrtype="ipv4"/><address addr="02:00:00:00:00:02" addrtype="mac"/></host><host><status state="up"/><address addr="10.42.0.3" addrtype="ipv4"/></host></nmaprun>"#;
