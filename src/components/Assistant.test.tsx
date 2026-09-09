@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { cleanup, render, screen, waitFor } from '@testing-library/react';
+import { act, cleanup, render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import Assistant from './Assistant';
 import HostCollection from './HostCollection';
@@ -126,6 +126,71 @@ function mount() {
   );
 }
 describe('reviewed subscription explanations', () => {
+  it('keeps newer streamed output when a status poll from before send finishes late', async () => {
+    const original = vi.mocked(command).getMockImplementation()!;
+    const stale = { ...response };
+    let finish!: (value: typeof response) => void;
+    let firstRead = true;
+    vi.mocked(command).mockImplementation(async (name, args) => {
+      if (name === 'explanation_status' && firstRead) {
+        firstRead = false;
+        return new Promise((resolve) => {
+          finish = resolve;
+        });
+      }
+      return original(name, args);
+    });
+    const user = userEvent.setup();
+    mount();
+    await screen.findByRole('option', { name: 'Fixture model' });
+    await user.click(screen.getByRole('button', { name: 'Prepare summary' }));
+    await user.click(
+      screen.getByRole('checkbox', { name: 'I reviewed this exact summary.' }),
+    );
+    await user.click(screen.getByRole('button', { name: 'Send to ChatGPT' }));
+    await screen.findByText('First streamed words');
+    await act(async () => finish(stale));
+    expect(screen.queryByText('First streamed words')).not.toBeNull();
+    expect(
+      (screen.getByRole('button', { name: 'Grok' }) as HTMLButtonElement)
+        .disabled,
+    ).toBe(true);
+  });
+  it('requires a new review and model lookup after the authenticated account changes', async () => {
+    const original = vi.mocked(command).getMockImplementation()!;
+    let account = 'first synthetic account';
+    vi.mocked(command).mockImplementation(async (name, args) =>
+      name === 'auth_status'
+        ? { ...((await original(name, args)) as object), account }
+        : original(name, args),
+    );
+    const user = userEvent.setup();
+    mount();
+    await screen.findByRole('option', { name: 'Fixture model' });
+    await user.click(screen.getByRole('button', { name: 'Prepare summary' }));
+    await user.click(
+      screen.getByRole('checkbox', { name: 'I reviewed this exact summary.' }),
+    );
+    await user.click(screen.getByText('ChatGPT connected'));
+    account = 'second synthetic account';
+    await user.click(screen.getByRole('button', { name: 'Check session' }));
+    await screen.findByText('second synthetic account');
+    expect(
+      (
+        screen.getByRole('checkbox', {
+          name: 'I reviewed this exact summary.',
+        }) as HTMLInputElement
+      ).checked,
+    ).toBe(false);
+    await waitFor(() =>
+      expect(
+        vi
+          .mocked(command)
+          .mock.calls.filter(([name]) => name === 'provider_models'),
+      ).toHaveLength(2),
+    );
+    expect(sent()).toHaveLength(0);
+  });
   it('restores a session and hides redundant sign-in controls', async () => {
     signedIn = false;
     mount();

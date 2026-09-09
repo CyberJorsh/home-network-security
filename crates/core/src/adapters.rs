@@ -134,6 +134,12 @@ pub fn bounded_output_cancellable(
     timeout: Duration,
     cancel: &std::sync::atomic::AtomicBool,
 ) -> Result<Vec<u8>> {
+    if cancel.load(std::sync::atomic::Ordering::Relaxed) {
+        bail!("Collection cancelled");
+    }
+    if timeout.is_zero() {
+        bail!("Tool timed out before start");
+    }
     let mut child = ChildGuard(
         command
             .stdout(Stdio::piped())
@@ -624,6 +630,17 @@ mod tests {
         assert!(result.unwrap_err().to_string().contains("cancelled"));
         assert!(start.elapsed() < Duration::from_secs(2));
         worker.join().unwrap();
+    }
+
+    #[test]
+    fn an_already_cancelled_tool_is_not_started() {
+        let result = bounded_output_cancellable(
+            &mut Command::new("nonexistent-hns-fixture-command"),
+            1024,
+            Duration::from_secs(1),
+            &std::sync::atomic::AtomicBool::new(true),
+        );
+        assert!(result.unwrap_err().to_string().contains("cancelled"));
     }
 
     #[test]

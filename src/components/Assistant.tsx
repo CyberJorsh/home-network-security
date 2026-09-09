@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { ArrowRight, LockKeyhole, Sparkles } from 'lucide-react';
 import { command, native } from '../api';
 import { buildSummary } from '../lib';
@@ -59,12 +59,37 @@ export default function Assistant({
   const [sending, setSending] = useState(false);
   const [output, setOutput] = useState<Output>();
   const generation = useRef(0);
-  useEffect(
-    () => () => {
+  const outputRevision = useRef(0);
+  const sendPending = useRef(false);
+  const mounted = useRef(false);
+  const account = useRef<Auth | undefined>(undefined);
+  useEffect(() => {
+    mounted.current = true;
+    return () => {
+      mounted.current = false;
       generation.current++;
-    },
-    [],
-  );
+      outputRevision.current++;
+    };
+  }, []);
+  const updateAuth = useCallback((value: Auth) => {
+    const previous = account.current;
+    if (
+      previous &&
+      (previous.signedIn !== value.signedIn ||
+        previous.account !== value.account ||
+        previous.plan !== value.plan)
+    ) {
+      generation.current++;
+      setLoading(false);
+      setCatalog(undefined);
+      setModel('');
+      setEffort('');
+      setModelError('');
+      setReviewed(false);
+    }
+    account.current = value;
+    setAuth(value);
+  }, []);
   const signedIn = auth?.signedIn;
   useEffect(() => {
     if (!native || !signedIn || auth?.busy || catalog || loading || modelError)
@@ -104,15 +129,20 @@ export default function Assistant({
     let alive = true;
     let timer: ReturnType<typeof setTimeout>;
     const poll = async () => {
-      let running = false;
+      let delay = 200;
+      const revision = outputRevision.current;
       try {
+        if (sendPending.current) return;
         const value = await command<Output>('explanation_status');
-        running = value.running;
-        if (alive) setOutput(value);
+        if (!alive || revision !== outputRevision.current) return;
+        delay = value.running ? 200 : 1500;
+        setOutput(value);
       } catch (e) {
-        if (alive) onError(String(e));
+        delay = 1500;
+        if (alive && revision === outputRevision.current) onError(String(e));
+      } finally {
+        if (alive) timer = setTimeout(() => void poll(), delay);
       }
-      if (alive) timer = setTimeout(() => void poll(), running ? 200 : 1500);
     };
     void poll();
     return () => {
@@ -147,20 +177,25 @@ export default function Assistant({
     }
   };
   const send = async () => {
-    if (!reviewed || !summary.trim() || busy) return;
+    if (!reviewed || !summary.trim() || busy || sendPending.current) return;
+    sendPending.current = true;
+    outputRevision.current++;
     setSending(true);
     setReviewed(false);
     try {
       await command('send_explanation', {
         request: { provider, model, effort, text: summary, reviewed: true },
       });
-      setOutput(await command<Output>('explanation_status'));
+      if (!mounted.current) return;
       setShowReview(false);
       onNotice(`Preparing the reviewed request for ${name}…`);
+      const value = await command<Output>('explanation_status');
+      if (mounted.current) setOutput(value);
     } catch (e) {
-      onError(String(e));
+      if (mounted.current) onError(String(e));
     } finally {
-      setSending(false);
+      sendPending.current = false;
+      if (mounted.current) setSending(false);
     }
   };
   return (
@@ -194,6 +229,7 @@ export default function Assistant({
                 setModelError('');
                 savePreferences(p);
                 setProvider(p);
+                account.current = undefined;
                 setAuth(undefined);
                 setCatalog(undefined);
                 setModel('');
@@ -205,7 +241,11 @@ export default function Assistant({
             </button>
           ))}
         </div>
-        <ProviderAuth key={provider} provider={provider} onStatus={setAuth} />
+        <ProviderAuth
+          key={provider}
+          provider={provider}
+          onStatus={updateAuth}
+        />
         {signedIn && (
           <div className="model-controls">
             <label htmlFor="explanation-model">Model</label>

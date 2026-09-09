@@ -52,6 +52,69 @@ fn duplicate_import_does_not_inflate_traffic() {
     assert_eq!(s.ingest(&events).unwrap(), 0);
     assert_eq!(s.snapshot(None, "local").unwrap().totals.upload, 123);
 }
+
+#[test]
+fn ignored_duplicate_does_not_change_identity_or_sensor_history() {
+    for same_batch in [false, true] {
+        let mut s = store();
+        let mut original = event("same-id", "10.0.0.2", "203.0.113.1", 123);
+        original.src_mac = Some("02:00:00:00:00:02".into());
+        let mut duplicate = original.clone();
+        duplicate.src_ip = "10.0.0.99".into();
+        duplicate.timestamp += 3600;
+        if same_batch {
+            assert_eq!(s.ingest(&[original.clone(), duplicate]).unwrap(), 1);
+        } else {
+            assert_eq!(s.ingest(std::slice::from_ref(&original)).unwrap(), 1);
+            assert_eq!(s.ingest(&[duplicate]).unwrap(), 0);
+        }
+        let view = s.snapshot(None, "local").unwrap();
+        assert_eq!(view.devices.len(), 1);
+        assert_eq!(view.devices[0].addresses, vec![original.src_ip]);
+        assert_eq!(view.devices[0].last_seen, original.timestamp);
+        assert_eq!(view.sensors[0].last_seen, Some(original.timestamp));
+        assert_eq!(view.totals.upload, original.bytes);
+    }
+}
+
+#[test]
+fn reused_ip_keeps_conversations_and_upload_evidence_with_each_device() {
+    for (first_mib, second_mib) in [(30, 30), (60, 10), (60, 60)] {
+        let mut s = store();
+        let mut first = event("first", "10.0.0.2", "203.0.113.1", first_mib * 1024 * 1024);
+        first.src_mac = Some("02:00:00:00:00:01".into());
+        let mut second = first.clone();
+        second.id = "second".into();
+        second.src_mac = Some("02:00:00:00:00:02".into());
+        second.timestamp += 600;
+        second.bytes = second_mib * 1024 * 1024;
+        s.ingest(&[first, second]).unwrap();
+        let view = s.snapshot(None, "local").unwrap();
+        assert_eq!(view.devices.len(), 2);
+        assert_eq!(view.conversations.len(), 2);
+        for device in &view.devices {
+            assert_eq!(device.connections, 1);
+            let flow = view
+                .conversations
+                .iter()
+                .find(|flow| flow.src_device.as_ref() == Some(&device.id))
+                .unwrap();
+            assert_eq!(flow.bytes, device.upload);
+            let notices: Vec<_> = view
+                .alerts
+                .iter()
+                .filter(|alert| alert.severity == "notice" && alert.device_id == device.id)
+                .collect();
+            assert_eq!(
+                notices.len(),
+                usize::from(device.upload >= 50 * 1024 * 1024)
+            );
+            for notice in notices {
+                assert_eq!(notice.evidence, vec![flow.id.clone()]);
+            }
+        }
+    }
+}
 #[test]
 fn rejects_invalid_batch_atomically() {
     let mut s = store();
@@ -60,6 +123,69 @@ fn rejects_invalid_batch_atomically() {
         .ingest(&[event("1", "10.0.0.2", "203.0.113.1", 10), invalid])
         .is_err());
     assert_eq!(s.snapshot(None, "local").unwrap().observation_count, 0);
+}
+
+#[test]
+fn sensor_write_failure_rolls_back_the_ingested_batch() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("transaction.db");
+    let mut s = Store::open(&path).unwrap();
+    s.set_sensor(&Sensor::new("test", "fixture")).unwrap();
+    let conn = rusqlite::Connection::open(&path).unwrap();
+    conn.execute_batch(
+        "CREATE TRIGGER reject_sensor_write BEFORE INSERT ON sensors
+         BEGIN SELECT RAISE(ABORT, 'synthetic sensor write failure'); END;",
+    )
+    .unwrap();
+    let mut observation = event("one", "10.0.0.2", "203.0.113.1", 100);
+    observation.src_mac = Some("02:00:00:00:00:02".into());
+    assert!(s.ingest(&[observation]).is_err());
+    let view = s.snapshot(None, "local").unwrap();
+    assert_eq!(view.observation_count, 0);
+    assert_eq!(view.sensors[0].last_seen, None);
+    assert_eq!(
+        conn.query_row("SELECT COUNT(*) FROM endpoint_identity", [], |r| r
+            .get::<_, i64>(0))
+            .unwrap(),
+        0
+    );
+}
+
+#[test]
+fn sensor_write_failure_rolls_back_discovery_evidence() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("discovery-transaction.db");
+    let s = Store::open(&path).unwrap();
+    s.set_sensor(&Sensor::new("test", "fixture")).unwrap();
+    let conn = rusqlite::Connection::open(&path).unwrap();
+    conn.execute_batch(
+        "CREATE TRIGGER reject_sensor_write BEFORE INSERT ON sensors
+         BEGIN SELECT RAISE(ABORT, 'synthetic sensor write failure'); END;",
+    )
+    .unwrap();
+    assert!(s
+        .save_discovery(
+            "test",
+            &[DiscoveredDevice {
+                ip: "10.0.0.2".into(),
+                mac: Some("02:00:00:00:00:02".into()),
+                hostname: Some("fixture.local".into()),
+                vendor: None,
+                details: DeviceDetails::default(),
+            }],
+        )
+        .is_err());
+    let view = s.snapshot(None, "local").unwrap();
+    assert!(view.devices.is_empty());
+    assert_eq!(view.sensors[0].last_seen, None);
+    for table in ["discovery", "discovery_first", "endpoint_identity"] {
+        assert_eq!(
+            conn.query_row(&format!("SELECT COUNT(*) FROM {table}"), [], |r| r
+                .get::<_, i64>(0))
+                .unwrap(),
+            0
+        );
+    }
 }
 #[test]
 fn unknown_sensor_is_not_silently_accepted() {

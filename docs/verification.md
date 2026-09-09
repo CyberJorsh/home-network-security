@@ -23,6 +23,16 @@ Record observed evidence rather than marking an item complete because a build pa
 
 No live home-network traffic, provider login/inference, or signed distribution is asserted by these tests.
 
+## September 9, 2026 reliability validation
+
+Local regression work corrected duplicate-record identity changes, mixed conversation evidence when different devices reuse an IP, partial ingestion/discovery commits on sensor-write failure, capture cleanup and buffered-record loss, stale UI responses, and collection-results navigation. Capture output lines are bounded to 16 KiB. Capture preflight checks only the required capture tool and respects cancellation. Ingestion prepares identity statements once per batch and conversation hashes are computed once per distinct conversation.
+
+Dashboard, collection, and account polls wait for the previous read to finish. Synthetic timing tests reproduced four pending dashboard reads during a 30-second stall and six account reads during a 3.5-second stall; each now stays at one pending poll. Source changes hide old observations until the selected source loads, and failed loads retain explicit local/sample recovery actions. Account changes clear model selections and review consent. Older streaming/history reads cannot erase newer output or restore a deleted history item.
+
+Validation on the development Mac passed 48 frontend tests, 54 Rust tests, TypeScript and the production web build, strict workspace clippy, rustfmt, Prettier, the authenticated synthetic loopback API smoke test, and actual TShark decoding of the generated four-frame offline PCAP. Three opt-in provider tests remained ignored. Browser interaction with synthetic data verified device rename, drawer closing, between-device filtering, alert acknowledgement, and redacted summary preparation. Mocked desktop interaction tests cover collection results, failure recovery, and keeping capture status and Stop available before a new sensor is registered; the browser preview does not exercise native collection or authentication.
+
+These changes are locally validated. This run did not exercise live network capture/discovery, provider login/inference, physical Windows behavior, signed bundles, or sustained traffic throughput. Whole-network coverage and the existing hardware acceptance gates remain open.
+
 ## Initial alpha validation record
 
 On 2026-09-05 UTC, the native Mac application was launched and exercised with synthetic data: empty local storage, isolated sample mode, device rename, authenticated connection to a local synthetic collector, native Nmap XML import (two discovered devices with zero traffic records), NDJSON import (840 observations), automatic selection of the imported source, local-traffic filtering, supporting alert conversations, and alert acknowledgement. Browser interaction verified that redacted summaries omit the sample endpoint identifiers and that editing the approved text revokes approval and disables sharing controls.

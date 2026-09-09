@@ -96,45 +96,55 @@ impl Store {
         if observations.len() > MAX_EVENTS {
             bail!("Import exceeds 100,000 observations; split it into batches");
         }
-        let known: HashSet<String> = self.sensors()?.into_iter().map(|s| s.id).collect();
+        let sensors = self.sensors()?;
+        let known: HashSet<&str> = sensors.iter().map(|s| s.id.as_str()).collect();
         for o in observations {
             o.validate()?;
-            if !known.contains(&o.sensor_id) {
+            if !known.contains(o.sensor_id.as_str()) {
                 bail!("Unknown sensor: {}", o.sensor_id);
             }
         }
         let limit = self.storage_limit()?;
         let tx = self.conn.transaction()?;
         let mut added = 0;
+        let mut latest: HashMap<&str, i64> = HashMap::new();
         {
             let mut stmt = tx.prepare("INSERT OR IGNORE INTO observations VALUES (?1,?2,?3,?4)")?;
+            let mut identity = tx.prepare("INSERT INTO endpoint_identity VALUES (?1,?2,?3,?4,?4) ON CONFLICT(sensor,mac,ip) DO UPDATE SET first=min(first,excluded.first),last=max(last,excluded.last)")?;
             for o in observations {
-                added += stmt.execute(params![
+                let inserted = stmt.execute(params![
                     o.id,
                     o.sensor_id,
                     o.timestamp,
                     serde_json::to_string(o)?
                 ])?;
+                // An ignored ID must not introduce identity or progress from a different body.
+                if inserted == 0 {
+                    continue;
+                }
+                added += inserted;
+                latest
+                    .entry(&o.sensor_id)
+                    .and_modify(|last| *last = (*last).max(o.timestamp))
+                    .or_insert(o.timestamp);
                 for (ip, mac) in [(&o.src_ip, &o.src_mac), (&o.dst_ip, &o.dst_mac)] {
                     if let Some(mac) = usable_mac(mac) {
-                        tx.execute("INSERT INTO endpoint_identity VALUES (?1,?2,?3,?4,?4) ON CONFLICT(sensor,mac,ip) DO UPDATE SET first=min(first,excluded.first),last=max(last,excluded.last)", params![o.sensor_id,mac,ip,o.timestamp])?;
+                        identity.execute(params![o.sensor_id, mac, ip, o.timestamp])?;
                     }
                 }
             }
         }
         tx.execute("DELETE FROM observations WHERE rowid IN (SELECT rowid FROM observations ORDER BY ts DESC, rowid DESC LIMIT -1 OFFSET ?1)",[limit as i64])?;
-        tx.commit()?;
-        for mut sensor in self.sensors()? {
-            if let Some(last) = observations
-                .iter()
-                .filter(|o| o.sensor_id == sensor.id)
-                .map(|o| o.timestamp)
-                .max()
-            {
+        for mut sensor in sensors {
+            if let Some(&last) = latest.get(sensor.id.as_str()) {
                 sensor.last_seen = Some(sensor.last_seen.unwrap_or(0).max(last));
-                self.set_sensor(&sensor)?;
+                tx.execute(
+                    "INSERT OR REPLACE INTO sensors VALUES (?1,?2)",
+                    params![sensor.id, serde_json::to_string(&sensor)?],
+                )?;
             }
         }
+        tx.commit()?;
         Ok(added)
     }
     pub fn import_json(&mut self, input: &str, sensor: &str) -> Result<usize> {
@@ -192,9 +202,9 @@ impl Store {
     }
     pub fn save_discovery(&self, sensor: &str, devices: &[DiscoveredDevice]) -> Result<()> {
         identifier(sensor)?;
-        if !self.sensors()?.iter().any(|s| s.id == sensor) {
+        let Some(mut current) = self.sensors()?.into_iter().find(|s| s.id == sensor) else {
             bail!("Unknown sensor");
-        }
+        };
         if devices.len() > 4096 {
             bail!("Discovery exceeds 4,096 addresses");
         }
@@ -253,12 +263,13 @@ impl Store {
                 tx.execute("INSERT INTO endpoint_identity VALUES (?1,?2,?3,?4,?4) ON CONFLICT(sensor,mac,ip) DO UPDATE SET first=min(first,excluded.first),last=max(last,excluded.last)",params![sensor,mac,device.ip,now])?;
             }
         }
+        current.last_seen = Some(current.last_seen.unwrap_or(0).max(now));
+        current.status = "discovery complete".into();
+        tx.execute(
+            "INSERT OR REPLACE INTO sensors VALUES (?1,?2)",
+            params![current.id, serde_json::to_string(&current)?],
+        )?;
         tx.commit()?;
-        if let Some(mut current) = self.sensors()?.into_iter().find(|s| s.id == sensor) {
-            current.last_seen = Some(chrono::Utc::now().timestamp());
-            current.status = "discovery complete".into();
-            self.set_sensor(&current)?;
-        }
         Ok(())
     }
     pub fn snapshot(&self, selected: Option<&str>, mode: &str) -> Result<Snapshot> {
@@ -459,26 +470,35 @@ impl Store {
                     }
                 }
             }
-            let key = format!(
-                "{}|{}|{:?}|{}|{:?}|{}",
-                o.sensor_id, o.src_ip, o.src_port, o.dst_ip, o.dst_port, o.protocol
-            );
-            let id = format!("flow-{:x}", Sha256::digest(key.as_bytes()));
-            let c = conversations.entry(key).or_insert_with(|| Conversation {
-                id,
-                src: o.src_ip.clone(),
-                dst: o.dst_ip.clone(),
-                src_device: src_id,
-                dst_device: dst_id,
-                port: o.dst_port,
-                protocol: o.protocol.clone(),
-                direction: direction.into(),
-                bytes: 0,
-                packets: 0,
-                first_seen: o.timestamp,
-                last_seen: o.timestamp,
-                sensor_id: o.sensor_id.clone(),
-            });
+            // DHCP reuse must not combine different devices' traffic or alert evidence.
+            let key = serde_json::to_string(&(
+                &o.sensor_id,
+                &o.src_ip,
+                o.src_port,
+                &o.dst_ip,
+                o.dst_port,
+                &o.protocol,
+                &src_id,
+                &dst_id,
+                direction,
+            ))?;
+            let c = conversations
+                .entry(key)
+                .or_insert_with_key(|key| Conversation {
+                    id: format!("flow-{:x}", Sha256::digest(key.as_bytes())),
+                    src: o.src_ip.clone(),
+                    dst: o.dst_ip.clone(),
+                    src_device: src_id,
+                    dst_device: dst_id,
+                    port: o.dst_port,
+                    protocol: o.protocol.clone(),
+                    direction: direction.into(),
+                    bytes: 0,
+                    packets: 0,
+                    first_seen: o.timestamp,
+                    last_seen: o.timestamp,
+                    sensor_id: o.sensor_id.clone(),
+                });
             c.bytes += o.bytes;
             c.packets += o.packets;
             c.first_seen = c.first_seen.min(o.timestamp);

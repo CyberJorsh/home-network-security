@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { command, native } from '../api';
 import SafeResponse from './SafeResponse';
 type Saved = {
@@ -15,25 +15,55 @@ export default function ExplanationHistory({
 }) {
   const [items, setItems] = useState<Saved[]>([]);
   const [busy, setBusy] = useState(false);
-  const refresh = async () =>
-    setItems(await command<Saved[]>('explanation_history'));
+  const lifetime = useRef(0);
+  const revision = useRef(0);
+  const acting = useRef(false);
+  useEffect(
+    () => () => {
+      lifetime.current++;
+      revision.current++;
+    },
+    [],
+  );
+  const refresh = async () => {
+    const read = ++revision.current;
+    try {
+      const value = await command<Saved[]>('explanation_history');
+      if (read === revision.current) setItems(value);
+    } catch (e) {
+      if (read === revision.current) onError(String(e));
+    }
+  };
   const act = async (name: string, args?: Record<string, unknown>) => {
+    if (acting.current) return;
+    acting.current = true;
+    const version = lifetime.current;
+    revision.current++;
     setBusy(true);
     try {
       await command(name, args);
+      if (version !== lifetime.current) return;
       await refresh();
     } catch (e) {
-      onError(String(e));
+      if (version === lifetime.current) onError(String(e));
     } finally {
-      setBusy(false);
+      if (version === lifetime.current) {
+        acting.current = false;
+        setBusy(false);
+      }
     }
   };
   return (
     <details
       className="panel setup-panel"
       onToggle={(e) => {
-        if (e.currentTarget.open && native)
-          void refresh().catch((e) => onError(String(e)));
+        if (
+          e.target === e.currentTarget &&
+          e.currentTarget.open &&
+          native &&
+          !acting.current
+        )
+          void refresh();
       }}
     >
       <summary>Saved explanations · on this computer</summary>

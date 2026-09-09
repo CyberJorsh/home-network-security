@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useEffect, useState } from 'react';
 import {
   Activity,
   Check,
@@ -28,7 +28,8 @@ import {
   X,
 } from 'lucide-react';
 import type { Alert, Page, Snapshot } from './types';
-import { acknowledge, command, native, readSnapshot, rename } from './api';
+import { acknowledge, command, native, rename } from './api';
+import useSnapshot from './useSnapshot';
 import { alertTitle, bytes, date, filterConversations } from './lib';
 import Chart from './components/Chart';
 import HostCollection from './components/HostCollection';
@@ -92,7 +93,14 @@ export default function App() {
   const [range, setRange] = useState('all');
   const [mode, setMode] = useState(native ? 'local' : 'demo');
   const [sensor, setSensor] = useState<string | null>(null);
-  const [snapshot, setSnapshot] = useState<Snapshot | null>(null);
+  const [sourceRevision, setSourceRevision] = useState(0);
+  const {
+    snapshot,
+    error: snapshotError,
+    loading,
+    refresh,
+    dismissError,
+  } = useSnapshot(mode, sensor, range, sourceRevision);
   const [error, setError] = useState('');
   const [notice, setNotice] = useState('');
   const [busy, setBusy] = useState(false);
@@ -102,42 +110,15 @@ export default function App() {
   const [name, setName] = useState('');
   const [assistantDevice, setAssistantDevice] = useState('');
   const [assistantAlert, setAssistantAlert] = useState<Alert | undefined>();
-  const sequence = useRef(0);
-  const loadSnapshot = useCallback(
-    async (sourceMode: string, sourceSensor: string | null) => {
-      const seq = ++sequence.current;
-      try {
-        const next = await readSnapshot(
-          sourceMode,
-          sourceSensor,
-          range === 'all'
-            ? null
-            : Math.floor(Date.now() / 1000) - Number(range),
-        );
-        if (seq === sequence.current) {
-          setSnapshot(next);
-          setError('');
-        }
-      } catch (e) {
-        if (seq === sequence.current) setError(String(e));
-      }
-    },
-    [range],
-  );
-  const refresh = useCallback(
-    () => loadSnapshot(mode, sensor),
-    [loadSnapshot, mode, sensor],
-  );
-  useEffect(() => {
-    void refresh();
-    const timer = setInterval(() => {
-      void refresh();
-    }, 10000);
-    return () => {
-      clearInterval(timer);
-      sequence.current++;
-    };
-  }, [refresh]);
+  const selectSource = (nextMode: string, nextSensor: string | null) => {
+    setMode(nextMode);
+    setSensor(nextSensor);
+    setSourceRevision((value) => value + 1);
+    setDetail(null);
+    setAssistantDevice('');
+    setAssistantAlert(undefined);
+    setQuery('');
+  };
   useEffect(() => {
     if (!notice) return;
     const timer = setTimeout(() => setNotice(''), 5000);
@@ -177,12 +158,10 @@ export default function App() {
         sensorId: string;
       } | null>('import_file');
       if (imported !== null) {
-        setMode('local');
-        setSensor(imported.sensorId);
+        selectSource('local', imported.sensorId);
         setNotice(
           `Imported ${imported.count.toLocaleString()} records into local storage.`,
         );
-        await loadSnapshot('local', imported.sensorId);
       }
     });
   useEffect(() => {
@@ -269,8 +248,13 @@ export default function App() {
             {native && (
               <select
                 aria-label="Traffic time range"
+                disabled={busy}
                 value={range}
-                onChange={(e) => setRange(e.target.value)}
+                onChange={(e) => {
+                  setRange(e.target.value);
+                  setDetail(null);
+                  setAssistantAlert(undefined);
+                }}
               >
                 <option value="all">All retained traffic</option>
                 <option value="3600">Last hour</option>
@@ -282,17 +266,16 @@ export default function App() {
               <select
                 className="sensor-select"
                 aria-label="Observation source"
+                disabled={busy}
                 value={snapshot.selectedSensor ?? ''}
                 onChange={(e) => {
-                  setSensor(e.target.value);
-                  setDetail(null);
-                  setAssistantDevice('');
+                  selectSource(mode, e.target.value);
                 }}
               >
                 <option value="" disabled>
                   Select source
                 </option>
-                {snapshot.sensors.map((s) => (
+                {snapshot?.sensors.map((s) => (
                   <option key={s.id} value={s.id}>
                     {s.name}
                   </option>
@@ -310,7 +293,7 @@ export default function App() {
             <button
               className="icon-button"
               aria-label="Refresh observations"
-              disabled={busy}
+              disabled={busy || loading}
               onClick={() => void run(refresh)}
             >
               <RefreshCw size={16} />
@@ -319,11 +302,18 @@ export default function App() {
           </div>
         </header>
         <main>
-          {error && (
+          {(error || snapshotError) && (
             <div className="banner error" role="alert">
-              <strong>Couldn’t complete that action.</strong> {error}{' '}
+              <strong>Couldn’t complete that action.</strong>{' '}
+              {error || snapshotError}{' '}
               {snapshot && 'Displayed observations may be stale.'}
-              <button aria-label="Dismiss error" onClick={() => setError('')}>
+              <button
+                aria-label="Dismiss error"
+                onClick={() => {
+                  setError('');
+                  dismissError();
+                }}
+              >
                 <X size={16} />
               </button>
             </div>
@@ -363,9 +353,9 @@ export default function App() {
               </span>
               {native && mode === 'demo' ? (
                 <button
+                  disabled={busy}
                   onClick={() => {
-                    setMode('local');
-                    setSensor(null);
+                    selectSource('local', null);
                   }}
                 >
                   Exit sample <ArrowRight size={14} />
@@ -385,10 +375,92 @@ export default function App() {
               Totals and alerts apply only to this view.
             </div>
           )}
+          {page === 'collection' && (
+            <Collection
+              snapshot={snapshot}
+              busy={busy}
+              onLocal={(id) =>
+                void run(async () => {
+                  await command('disconnect_collector');
+                  selectSource('local', id);
+                })
+              }
+              onView={(id) =>
+                void run(async () => {
+                  await command('disconnect_collector');
+                  selectSource('local', id);
+                  navigate('devices');
+                })
+              }
+              onImport={importFile}
+              onSample={() => {
+                selectSource('demo', null);
+              }}
+              onConnect={(port, token) =>
+                run(async () => {
+                  await command('connect_collector', { port, token });
+                  selectSource('local', null);
+                  setNotice(
+                    'Collector connected. Observations remain on your devices.',
+                  );
+                })
+              }
+              onDisconnect={() =>
+                run(async () => {
+                  await command('disconnect_collector');
+                  selectSource('local', null);
+                  setNotice('Collector disconnected.');
+                })
+              }
+              onNetworks={(cidrs) =>
+                run(async () => {
+                  await command('configure_networks', { cidrs });
+                  await refresh();
+                  setNotice('Local prefixes saved.');
+                })
+              }
+            />
+          )}
           {!snapshot ? (
             <div className="empty-state">
               <RefreshCw size={24} />
-              <h2>Loading observations…</h2>
+              <h2>
+                {snapshotError
+                  ? 'Couldn’t load observations.'
+                  : 'Loading observations…'}
+              </h2>
+              {snapshotError && (
+                <div className="button-row">
+                  <button
+                    className="button secondary"
+                    disabled={busy || loading}
+                    onClick={() => void refresh()}
+                  >
+                    Retry loading
+                  </button>
+                  {native && (
+                    <button
+                      className="button secondary"
+                      disabled={busy}
+                      onClick={() =>
+                        void run(async () => {
+                          await command('disconnect_collector');
+                          selectSource('local', null);
+                        })
+                      }
+                    >
+                      Use local observations
+                    </button>
+                  )}
+                  <button
+                    className="link-button"
+                    disabled={busy}
+                    onClick={() => selectSource('demo', null)}
+                  >
+                    Explore sample
+                  </button>
+                </div>
+              )}
             </div>
           ) : (
             <>
@@ -498,8 +570,7 @@ export default function App() {
                             text="Import observations or connect a collector to see your devices."
                             action="Explore a sample"
                             onAction={() => {
-                              setMode('demo');
-                              setSensor(null);
+                              selectSource('demo', null);
                             }}
                           />
                         )}
@@ -762,52 +833,6 @@ export default function App() {
                 </section>
               )}
               {page === 'collection' && (
-                <Collection
-                  snapshot={snapshot}
-                  busy={busy}
-                  onLocal={(id) =>
-                    void run(async () => {
-                      await command('disconnect_collector');
-                      setMode('local');
-                      setSensor(id);
-                      await loadSnapshot('local', id);
-                    })
-                  }
-                  onImport={importFile}
-                  onSample={() => {
-                    setMode('demo');
-                    setSensor(null);
-                  }}
-                  onConnect={(port, token) =>
-                    run(async () => {
-                      await command('connect_collector', { port, token });
-                      setMode('local');
-                      setSensor(null);
-                      setNotice(
-                        'Collector connected. Observations remain on your devices.',
-                      );
-                      await loadSnapshot('local', null);
-                    })
-                  }
-                  onDisconnect={() =>
-                    run(async () => {
-                      await command('disconnect_collector');
-                      setMode('local');
-                      setSensor(null);
-                      setNotice('Collector disconnected.');
-                      await loadSnapshot('local', null);
-                    })
-                  }
-                  onNetworks={(cidrs) =>
-                    run(async () => {
-                      await command('configure_networks', { cidrs });
-                      await refresh();
-                      setNotice('Local prefixes saved.');
-                    })
-                  }
-                />
-              )}
-              {page === 'collection' && (
                 <AlertControls
                   onError={setError}
                   onChanged={() => void refresh()}
@@ -817,14 +842,13 @@ export default function App() {
                 <StorageControls
                   onError={setError}
                   onChanged={() => {
-                    setSensor(null);
-                    void loadSnapshot(mode, null);
+                    selectSource(mode, null);
                   }}
                 />
               )}
               {page === 'assistant' && (
                 <Assistant
-                  key={`${assistantDevice}:${assistantAlert?.id ?? ''}:${snapshot.selectedSensor}`}
+                  key={`${mode}:${assistantDevice}:${assistantAlert?.id ?? ''}:${snapshot.selectedSensor}`}
                   snapshot={snapshot}
                   initialDevice={assistantDevice}
                   alert={assistantAlert}
@@ -1076,6 +1100,7 @@ function Empty({
 
 function Collection({
   onLocal,
+  onView,
   snapshot,
   busy,
   onImport,
@@ -1084,9 +1109,10 @@ function Collection({
   onDisconnect,
   onNetworks,
 }: {
-  snapshot: Snapshot;
+  snapshot: Snapshot | null;
   busy: boolean;
   onLocal: (sensor: string) => void;
+  onView: (sensor: string) => void;
   onImport: () => void;
   onSample: () => void;
   onConnect: (port: number, token: string) => Promise<void>;
@@ -1095,10 +1121,14 @@ function Collection({
 }) {
   const [port, setPort] = useState('9898');
   const [token, setToken] = useState('');
-  const [cidrs, setCidrs] = useState(snapshot.networks.join(','));
+  const networks = snapshot?.networks.join(',');
+  const [cidrs, setCidrs] = useState(networks ?? '');
+  useEffect(() => {
+    if (networks !== undefined) setCidrs(networks);
+  }, [networks]);
   return (
     <div className="collection-grid">
-      <HostCollection onLocal={onLocal} />
+      <HostCollection onLocal={onLocal} onView={onView} parentBusy={busy} />
       <details className="panel setup-panel collector-details">
         <summary>
           Connect a collector <span className="muted">Optional</span>
@@ -1168,7 +1198,7 @@ function Collection({
             A collector only sees traffic that reaches its capture interface. A
             router uplink can miss conversations inside your home.
           </p>
-          {snapshot.sensors.map((s) => (
+          {snapshot?.sensors.map((s) => (
             <div className="sensor-card" key={s.id}>
               <strong>
                 <Radio size={15} />
@@ -1200,7 +1230,10 @@ function Collection({
               </dl>
             </div>
           ))}
-          {!snapshot.sensors.length && (
+          {!snapshot && (
+            <p className="hint">Waiting for observation source details.</p>
+          )}
+          {snapshot && !snapshot.sensors.length && (
             <p className="hint">
               No sensors connected. Whole-network visibility has not been
               established.
@@ -1222,7 +1255,7 @@ function Collection({
               <FileUp size={16} />
               Import file
             </button>
-            <button className="link-button" onClick={onSample}>
+            <button className="link-button" disabled={busy} onClick={onSample}>
               Explore sample <ArrowRight size={14} />
             </button>
           </div>
@@ -1251,7 +1284,7 @@ function Collection({
             />
             <button
               className="button secondary"
-              disabled={!native || busy || snapshot.mode !== 'local'}
+              disabled={!native || busy || snapshot?.mode !== 'local'}
             >
               Save prefixes
             </button>
