@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { command, native } from '../api';
 import type { Provider } from '../types';
 export type Auth = {
@@ -19,44 +19,72 @@ export default function ProviderAuth({
 }) {
   const [auth, setAuth] = useState<Auth>();
   const [error, setError] = useState('');
+  const [pollError, setPollError] = useState('');
   const [pending, setPending] = useState(false);
+  const lifetime = useRef(0);
+  const revision = useRef(0);
+  const actionPending = useRef(false);
+  const statusCallback = useRef(onStatus);
+  statusCallback.current = onStatus;
   useEffect(() => {
     if (!native) return;
-    let alive = true;
+    const version = ++lifetime.current;
+    actionPending.current = false;
     let checking = false;
+    let timer: ReturnType<typeof setTimeout>;
     const poll = async () => {
+      let delay = 700;
+      let read = revision.current;
       try {
+        if (actionPending.current) return;
+        read = ++revision.current;
         const value = await command<Auth>('auth_status', { provider });
-        if (!alive) return;
+        if (version !== lifetime.current || read !== revision.current) return;
         setAuth(value);
-        onStatus(value);
+        setPollError('');
+        statusCallback.current(value);
+        if (value.message && !value.busy) delay = 1500;
         if (!value.message && !value.busy && !checking) {
           checking = true;
           await command('auth_action', { provider, action: 'check' });
         }
       } catch (e) {
-        if (alive) setError(String(e));
+        if (version === lifetime.current && read === revision.current)
+          setPollError(String(e));
+      } finally {
+        if (version === lifetime.current)
+          timer = setTimeout(() => void poll(), delay);
       }
     };
     void poll();
-    const interval = setInterval(() => void poll(), 700);
     return () => {
-      alive = false;
-      clearInterval(interval);
+      lifetime.current++;
+      clearTimeout(timer);
     };
-  }, [provider, onStatus]);
+  }, [provider]);
   const action = async (action: string) => {
+    if (actionPending.current) return;
+    const version = lifetime.current;
+    actionPending.current = true;
+    revision.current++;
     setError('');
+    setPollError('');
     setPending(true);
     try {
       await command('auth_action', { provider, action });
+      if (version !== lifetime.current) return;
+      const read = ++revision.current;
       const value = await command<Auth>('auth_status', { provider });
+      if (version !== lifetime.current || read !== revision.current) return;
       setAuth(value);
-      onStatus(value);
+      statusCallback.current(value);
     } catch (e) {
-      setError(String(e));
+      if (version === lifetime.current) setError(String(e));
     } finally {
-      setPending(false);
+      if (version === lifetime.current) {
+        actionPending.current = false;
+        setPending(false);
+      }
     }
   };
   const name = provider === 'chatgpt' ? 'ChatGPT' : 'Grok';
@@ -124,6 +152,7 @@ export default function ProviderAuth({
           {auth?.busy && (
             <button
               className="link-button"
+              disabled={pending}
               onClick={() => void action('cancel')}
             >
               Cancel sign-in check
@@ -157,7 +186,7 @@ export default function ProviderAuth({
           </details>
         </>
       )}
-      {error && <p role="alert">{error}</p>}
+      {(error || pollError) && <p role="alert">{error || pollError}</p>}
       {!native && <p>Provider sessions and sends require the desktop app.</p>}
     </div>
   );

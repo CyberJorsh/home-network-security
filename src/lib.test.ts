@@ -137,6 +137,12 @@ describe('privacy boundary', () => {
   it('includes reported device evidence and redacts free-form identity when requested', () => {
     const enriched = structuredClone(sample);
     enriched.devices[0].details = {
+      fieldObservedAt: {
+        hostname: 1,
+        'private.local 10.0.0.2': 2,
+        vendor: -1,
+        model: Infinity,
+      },
       hostname: 'private.local',
       vendor: 'Fixture vendor',
       model: 'Fixture hardware',
@@ -172,6 +178,8 @@ describe('privacy boundary', () => {
     ])
       expect(hidden).not.toContain(detail);
     expect(full).not.toContain('203.0.113.99');
+    const data = JSON.parse(hidden.slice(hidden.indexOf('{')));
+    expect(data.deviceDetails.identityFieldObservedAt).toEqual({ hostname: 1 });
   });
   it('labels observation alerts with the current device name', () => {
     expect(

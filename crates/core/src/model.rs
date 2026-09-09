@@ -168,6 +168,29 @@ pub struct Conversation {
     pub sensor_id: String,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct AlertRules {
+    pub upload_enabled: bool,
+    pub upload_threshold_mib: u64,
+}
+impl Default for AlertRules {
+    fn default() -> Self {
+        Self {
+            upload_enabled: true,
+            upload_threshold_mib: 50,
+        }
+    }
+}
+impl AlertRules {
+    pub fn validate(&self) -> Result<()> {
+        if !(1..=1_048_576).contains(&self.upload_threshold_mib) {
+            bail!("Upload threshold must be between 1 and 1,048,576 MiB per UTC hour");
+        }
+        Ok(())
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Alert {
@@ -252,6 +275,21 @@ pub fn device_id(sensor: &str, ip: &str, mac: &Option<String>) -> String {
         .map(|m| m.to_lowercase())
         .unwrap_or_else(|| ip.into());
     format!("{sensor}:{identity}:{ip}")
+}
+
+pub fn link_local(ip: &str) -> bool {
+    match ip.parse::<IpAddr>() {
+        Ok(IpAddr::V4(ip)) => ip.is_link_local(),
+        Ok(IpAddr::V6(ip)) => ip.is_unicast_link_local(),
+        _ => false,
+    }
+}
+
+pub fn group_mac(mac: &Option<String>) -> bool {
+    mac.as_deref()
+        .and_then(|v| v.split(':').next())
+        .and_then(|v| u8::from_str_radix(v, 16).ok())
+        .is_some_and(|first| first & 1 != 0)
 }
 
 /// Ethernet multicast, broadcast, and zero addresses do not identify an endpoint.

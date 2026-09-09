@@ -14,7 +14,7 @@ The collector runs as a foreground process, not an installed service. Build with
 
 A Raspberry Pi is an optional collector host, not a visibility shortcut. ESXi configuration is environment-specific and must be verified against its virtual-switch/port-group policy. This app does not configure routers, switches, hypervisors, or mirrors for you.
 
-Test both an internet transfer and a transfer between two other home devices at the intended observation point. Compare recorded endpoints and byte counts with your test traffic, and inspect capture loss. Start coverage unverified. This alpha exposes unverified coverage and unknown loss; it does not yet store a verified topology or packet-drop telemetry.
+Test both an internet transfer and a transfer between two other home devices at the intended observation point. Compare recorded endpoints and byte counts with your test traffic, and inspect capture loss. Start coverage unverified. This alpha keeps coverage unverified and does not yet store a verified topology. Completed captures store a dropped-packet count when the tool emits a supported final diagnostic; a missing report, failure, or interruption leaves loss unknown.
 
 ## Local capture and discovery
 
@@ -27,7 +27,7 @@ tshark -D
 
 CLI discovery sends host-detection probes. The desktop additionally offers an explicit checkbox to inspect the top 20 TCP ports with a connect scan and light service detection; it does not run exploit or vulnerability scripts. Only select a network you are authorized to inspect. There is no scan-on-launch behavior. The GUI also imports Nmap XML and launches explicit local discovery/capture jobs.
 
-`capture` runs TShark with name resolution disabled, only emitting selected fields. No payload file is created by this application. It stops after the selected duration (1 second–24 hours), with a deadline and bounded queue. Exit diagnostics matter; packet loss is unknown. Sudden termination may leave the stored status as collecting; the GUI labels missing recent observations and does not call that a healthy sensor.
+`capture` runs TShark with name resolution disabled, only emitting selected fields. No payload file is created by this application. It stops after the selected duration (1 second–24 hours), with a deadline and bounded queue. Exit diagnostics matter; a supported final dropped-packet report is recorded only after a successful, uninterrupted capture. Otherwise packet loss remains unknown. Sudden termination may leave the stored status as collecting; the GUI labels missing recent observations and does not call that a healthy sensor.
 
 ## Remote collector
 
@@ -73,7 +73,7 @@ Discovery and each capture interface get separate observation sources. Starting 
 
 On macOS, `brew install nmap wireshark` installs the CLI tools. Wireshark's signed ChmodBPF installer enables BPF access for members of `access_bpf`; Homebrew also exposes it as `brew install --cask wireshark-chmodbpf`. Administrator authorization is required. Restart the app after installation; depending on your environment, logging out or rebooting may be needed for group membership. On Windows install the Npcap driver with the appropriate license and permissions. Interface enumeration alone does not establish that a capture will succeed.
 
-Unprivileged discovery can miss devices that do not respond to its probes. Host capture typically sees the computer's own traffic plus broadcasts and multicast, not all conversations between other devices. Coverage remains unverified and packet drops are shown as unknown. Add your actual globally routed local IPv6 prefix in **Your local networks** for correct direction classification.
+Unprivileged discovery can miss devices that do not respond to its probes. Host capture typically sees the computer's own traffic plus broadcasts and multicast, not all conversations between other devices. Coverage remains unverified; packet drops remain unknown unless the completed capture supplies a supported final report. Add your actual globally routed local IPv6 prefix in **Your local networks** for correct direction classification.
 
 ## Guided dependency setup
 

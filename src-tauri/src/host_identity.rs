@@ -102,8 +102,10 @@ fn apply(found: &mut [DiscoveredDevice], identity: Identity) {
             .os
             .clone()
             .or(device.details.operating_system.take());
-        device.details.source =
-            Some("This computer's OS identity and Nmap service discovery".into());
+        device.details.source = Some(format!(
+            "This computer's OS identity; {}",
+            device.details.source.as_deref().unwrap_or("Nmap discovery")
+        ));
     }
 }
 pub fn enrich(found: &mut [DiscoveredDevice], cancel: &AtomicBool) {
@@ -118,7 +120,14 @@ mod tests {
     fn os_identity_only_enriches_an_address_of_this_computer() {
         let mut devices = hns_core::parse_nmap(r#"<nmaprun><host><status state="up"/><address addr="10.0.0.2" addrtype="ipv4"/></host><host><status state="up"/><address addr="10.0.0.3" addrtype="ipv4"/></host></nmaprun>"#).unwrap();
         let identity: Identity = serde_json::from_value(serde_json::json!({"name":"Fixture PC","model":"Fixture model","vendor":"Fixture vendor","os":"Fixture OS","adapters":[{"addresses":["10.0.0.2"],"mac":"02-00-00-00-00-02"}]})).unwrap();
+        devices[0].details.source = Some("Nmap discovery; service inspection incomplete".into());
         apply(&mut devices, identity);
+        assert!(devices[0]
+            .details
+            .source
+            .as_deref()
+            .unwrap()
+            .contains("service inspection incomplete"));
         assert_eq!(devices[0].hostname.as_deref(), Some("Fixture PC"));
         assert_eq!(devices[0].mac.as_deref(), Some("02:00:00:00:00:02"));
         assert_eq!(devices[0].details.model.as_deref(), Some("Fixture model"));

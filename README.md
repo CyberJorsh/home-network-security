@@ -86,7 +86,7 @@ Read the [collector guide](docs/collector.md) before choosing a sensor location.
 - No cross-sensor totals that could double-count mirrored packets. No long-term aggregation or configurable time range yet.
 - Device identities are observed IP/MAC combinations within a sensor domain. DHCP changes, randomized MACs, IPv6 privacy addresses, or missing link-layer metadata may create separate entries. Names do not authenticate devices.
 - Prefix configuration determines internet versus local traffic. Add your globally routed home IPv6 prefix when applicable.
-- Capture loss is currently **unknown**; quiet traffic does not prove a healthy or complete sensor.
+- Completed captures show dropped-packet counts when the capture tool emits a supported final diagnostic. Missing reports, failed captures, and interrupted captures remain **unknown**; quiet traffic does not prove a healthy or complete sensor.
 - Encrypted contents, destination reputation, device ownership, and compromise cannot be inferred just from these records.
 - Application data is not encrypted by the app. Use your OS account protections and disk encryption; see [security policy](SECURITY.md).
 

@@ -23,6 +23,16 @@ Record observed evidence rather than marking an item complete because a build pa
 
 No live home-network traffic, provider login/inference, or signed distribution is asserted by these tests.
 
+## September 9, 2026 reliability validation
+
+Local regression work corrected duplicate-record identity changes, mixed conversation evidence when different devices reuse an IP, partial ingestion/discovery commits on sensor-write failure, capture cleanup and buffered-record loss, stale UI responses, and collection-results navigation. Capture output lines are bounded to 16 KiB. Capture preflight checks only the required capture tool and respects cancellation. Ingestion prepares identity statements once per batch and conversation hashes are computed once per distinct conversation.
+
+Dashboard, collection, and account polls wait for the previous read to finish. Synthetic timing tests reproduced four pending dashboard reads during a 30-second stall and six account reads during a 3.5-second stall; each now stays at one pending poll. Source changes hide old observations until the selected source loads, and failed loads retain explicit local/sample recovery actions. Account changes clear model selections and review consent. Older streaming/history reads cannot erase newer output or restore a deleted history item.
+
+Validation on the development Mac passed 48 frontend tests, 54 Rust tests, TypeScript and the production web build, strict workspace clippy, rustfmt, Prettier, the authenticated synthetic loopback API smoke test, and actual TShark decoding of the generated four-frame offline PCAP. Three opt-in provider tests remained ignored. Browser interaction with synthetic data verified device rename, drawer closing, between-device filtering, alert acknowledgement, and redacted summary preparation. Mocked desktop interaction tests cover collection results, failure recovery, and keeping capture status and Stop available before a new sensor is registered; the browser preview does not exercise native collection or authentication.
+
+These changes are locally validated. This run did not exercise live network capture/discovery, provider login/inference, physical Windows behavior, signed bundles, or sustained traffic throughput. Whole-network coverage and the existing hardware acceptance gates remain open.
+
 ## Initial alpha validation record
 
 On 2026-09-05 UTC, the native Mac application was launched and exercised with synthetic data: empty local storage, isolated sample mode, device rename, authenticated connection to a local synthetic collector, native Nmap XML import (two discovered devices with zero traffic records), NDJSON import (840 observations), automatic selection of the imported source, local-traffic filtering, supporting alert conversations, and alert acknowledgement. Browser interaction verified that redacted summaries omit the sample endpoint identifiers and that editing the approved text revokes approval and disables sharing controls.
@@ -65,3 +75,19 @@ Packet-drop parsing is tested against explicit TShark and dumpcap counter format
 A release verification script correctly refused the unsigned/ad-hoc development Mac app. No Developer ID Application identity was available; signing/notarization and physical Windows/fresh-machine installation acceptance remain open in [installation acceptance](installation-acceptance.md). Automated tests and development bundles do not close those gates.
 
 The native delete-dialog test unexpectedly completed deletion before a reviewable stop. All original observations, sensors, names, discovery records and acknowledgements were restored from the private validation backup and compared table by table. The destructive action now requires an exact typed confirmation in the app, checked again by the native command. Opening or cancelling the panel never invokes deletion; frontend and Rust regression tests enforce this boundary.
+
+## Live discovery corrections
+
+An authorized home-network exercise on macOS exposed destination-only scan probes and Ethernet broadcasts appearing as device inventory entries. Destination traffic remains in conversations and accounting, but a destination becomes a device only after source traffic or discovery supplies presence evidence. Ethernet group destinations stay outside device inventory. A MAC also observed carrying traffic outside the configured local networks is treated as a possible routing hop, never as a shared endpoint identity or a reason to propagate a name. Configure local IPv6 prefixes correctly; unknown or randomized identities remain conservative.
+
+The corrected native app reopened the retained live observations, excluded phantom scan targets and broadcast destinations, and preserved the original records and user metadata. Discovery now probes additional common TCP ports after a separate live comparison found responses missed by the default probe set. Local upload rules support an explicit enable switch and a bounded MiB threshold per UTC hour, with per-hour evidence and acknowledgements. These corrections address parts of issue #4; they do not establish whole-network visibility, Windows runtime acceptance, or identity reconciliation for every IPv6/privacy-address topology.
+
+The same live exercise found a second discovery failure: service-stage timeouts could drop responding hosts from the result. Discovery now runs before service identification, and the second phase inspects only confirmed addresses within the selected range. Its time budget is the remainder of the five-minute job limit. Incomplete service work retains the host and reports a visible warning. Conflicting MAC results do not transfer service details across a reused address.
+
+## Live host evidence and remaining topology gates
+
+The September 5, 2026 macOS exercise used the operator's three authorized private /24 networks. Native discovery/service runs were compared with a separate bounded Nmap reachability pass. An explicit Wi-Fi metadata capture included a successful controlled HTTPS download and replies from each selected subnet's gateway. The downloaded application byte count was less than the captured inbound frame-byte count, as expected for framing, TLS, and protocol overhead; these are different measurements, not interchangeable totals. Native time filtering matched the retained database records. Private before/after comparison confirmed that existing observations and user metadata were preserved.
+
+These observations support host reachability and capture of this computer's traffic. They do not demonstrate capture of a controlled transfer between two other devices, a Linux/Raspberry Pi collector or SSH tunnel on real hardware, a physical Windows capture driver, or a complete packet-loss measurement. Reported drops remained unknown where the capture engine did not provide a final counter. Coverage stays unverified. No real inventory, addresses, MACs, capture files, provider identity, or private test report belongs in public issues or CI artifacts.
+
+Issue #2 remains open until the missing physical topology exercises are observed. Hosted CI can validate the Windows build but cannot supply those observations. The actual home prefixes, tool output, transfer reference, database backup, and per-device checks are retained only in the operator's ignored local validation directory.

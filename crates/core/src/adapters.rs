@@ -134,6 +134,12 @@ pub fn bounded_output_cancellable(
     timeout: Duration,
     cancel: &std::sync::atomic::AtomicBool,
 ) -> Result<Vec<u8>> {
+    if cancel.load(std::sync::atomic::Ordering::Relaxed) {
+        bail!("Collection cancelled");
+    }
+    if timeout.is_zero() {
+        bail!("Tool timed out before start");
+    }
     let mut child = ChildGuard(
         command
             .stdout(Stdio::piped())
@@ -400,17 +406,16 @@ pub fn discover_with_services(
         ipnet::IpNet::V4(net) if net.prefix_len() >= 24 && net.network().is_private() => {}
         _ => bail!("Discovery is limited to private IPv4 networks of /24 or smaller"),
     }
+    let started = Instant::now();
     let mut command = tool_command("nmap");
-    if services {
-        command.args(["-sT", "-sV", "--version-light", "--top-ports", "20"]);
-    } else {
-        command.arg("-sn");
-    }
+    // Keep confirmed discovery independent from slower service identification.
     command.args([
+        "-sn",
+        "-PS22,80,443,445,3389,8008,8080",
         "--max-retries",
         "1",
         "--host-timeout",
-        if services { "30s" } else { "10s" },
+        "10s",
         "-oX",
         "-",
         cidr,
@@ -418,16 +423,194 @@ pub fn discover_with_services(
     let output = bounded_output_cancellable(
         &mut command,
         16 * 1024 * 1024,
-        Duration::from_secs(300),
+        Duration::from_secs(150),
         cancel,
     )
     .context("Discovery requires separately installed Nmap")?;
-    parse_nmap(&String::from_utf8(output)?)
+    let mut found = parse_nmap(&String::from_utf8(output)?)?;
+    found.retain(|d| local(&d.ip, &nets));
+    if let ipnet::IpNet::V4(net) = nets[0] {
+        let known: std::collections::HashSet<_> = found.iter().map(|d| d.ip.clone()).collect();
+        let remaining: Vec<_> = net
+            .hosts()
+            .filter(|ip| !known.contains(&ip.to_string()))
+            .collect();
+        // OS ping can send ICMP without requiring Nmap raw-socket privileges.
+        // Bound both concurrency and each child, and stop between small batches.
+        for batch in remaining.chunks(16) {
+            if cancel.load(std::sync::atomic::Ordering::Relaxed) {
+                bail!("Collection cancelled");
+            }
+            if started.elapsed() >= Duration::from_secs(200) {
+                break;
+            }
+            std::thread::scope(|scope| {
+                let workers: Vec<_> = batch
+                    .iter()
+                    .map(|ip| {
+                        scope.spawn(move || {
+                            let mut command = tool_command("ping");
+                            if cfg!(windows) {
+                                command.args(["-n", "1", "-w", "1000"]);
+                            } else if cfg!(target_os = "macos") {
+                                command.args(["-n", "-c", "1", "-W", "1000"]);
+                            } else {
+                                command.args(["-n", "-c", "1", "-W", "1"]);
+                            }
+                            command.arg(ip.to_string());
+                            bounded_output_cancellable(
+                                &mut command,
+                                8192,
+                                Duration::from_secs(2),
+                                cancel,
+                            )
+                            .ok()
+                            .filter(|output| echo_reply(output))
+                            .map(|_| DiscoveredDevice {
+                                ip: ip.to_string(),
+                                mac: None,
+                                hostname: None,
+                                vendor: None,
+                                details: DeviceDetails {
+                                    source: Some("ICMP echo response".into()),
+                                    ..DeviceDetails::default()
+                                },
+                            })
+                        })
+                    })
+                    .collect();
+                for worker in workers {
+                    if let Ok(Some(device)) = worker.join() {
+                        found.push(device);
+                    }
+                }
+            });
+        }
+    }
+    if cancel.load(std::sync::atomic::Ordering::Relaxed) {
+        bail!("Collection cancelled");
+    }
+    if !services || found.is_empty() {
+        return Ok(found);
+    }
+    let mut command = tool_command("nmap");
+    command.args([
+        "-sT",
+        "-sV",
+        "--version-light",
+        "--top-ports",
+        "20",
+        "-Pn",
+        "--max-retries",
+        "1",
+        "--host-timeout",
+        "30s",
+        "-oX",
+        "-",
+    ]);
+    command.args(found.iter().map(|d| d.ip.as_str()));
+    let remaining = Duration::from_secs(300).saturating_sub(started.elapsed());
+    let inspected = bounded_output_cancellable(&mut command, 16 * 1024 * 1024, remaining, cancel)
+        .and_then(|bytes| parse_nmap(&String::from_utf8(bytes)?));
+    if cancel.load(std::sync::atomic::Ordering::Relaxed) {
+        bail!("Collection cancelled");
+    }
+    // A timeout must not erase hosts which already answered discovery. Preserve
+    // the response evidence and explicitly label service coverage as incomplete.
+    Ok(merge_service_discovery(found, inspected.ok()))
+}
+
+fn echo_reply(output: &[u8]) -> bool {
+    // Windows ping can exit successfully for a destination-unreachable reply.
+    // IPv4 echo replies carry a TTL value; an ICMP error alone is not presence.
+    String::from_utf8_lossy(output)
+        .to_ascii_lowercase()
+        .contains("ttl=")
+}
+
+fn merge_service_discovery(
+    mut found: Vec<DiscoveredDevice>,
+    inspected: Option<Vec<DiscoveredDevice>>,
+) -> Vec<DiscoveredDevice> {
+    for device in &mut found {
+        if let Some(details) = inspected
+            .as_ref()
+            .and_then(|items| items.iter().find(|d| d.ip == device.ip))
+        {
+            if usable_mac(&device.mac).is_some()
+                && usable_mac(&details.mac).is_some()
+                && usable_mac(&device.mac) != usable_mac(&details.mac)
+            {
+                device.details.source = Some(
+                    "Nmap discovery; service inspection incomplete because endpoint MAC changed"
+                        .into(),
+                );
+                continue;
+            }
+            device.details = merge_details(device.details.clone(), details.details.clone());
+            device.details.source = Some("Nmap discovery and service inspection".into());
+            device.hostname = details.hostname.clone().or(device.hostname.take());
+            // The discovery phase provides the identity anchor; do not replace
+            // its MAC with a later conflicting result at a possibly reused IP.
+        } else {
+            device.details.source = Some("Nmap discovery; service inspection incomplete".into());
+        }
+    }
+    found
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn icmp_errors_do_not_establish_device_presence() {
+        assert!(echo_reply(
+            b"64 bytes from 10.42.0.2: icmp_seq=0 ttl=64 time=1.0 ms"
+        ));
+        assert!(echo_reply(
+            b"Reply from 10.42.0.2: bytes=32 time<1ms TTL=128"
+        ));
+        assert!(!echo_reply(
+            b"Reply from 10.42.0.1: Destination host unreachable."
+        ));
+        assert!(!echo_reply(b"Request timed out."));
+        assert!(!echo_reply(b"TTL expired in transit."));
+    }
+    #[test]
+    fn service_timeouts_preserve_discovery_and_conflicting_macs_do_not_enrich() {
+        let xml = r#"<nmaprun><host><status state="up"/><address addr="10.42.0.2" addrtype="ipv4"/><address addr="02:00:00:00:00:02" addrtype="mac"/></host><host><status state="up"/><address addr="10.42.0.3" addrtype="ipv4"/></host></nmaprun>"#;
+        let found = parse_nmap(xml).unwrap();
+        let mut inspected = found[0].clone();
+        inspected.details.operating_system = Some("Fixture OS".into());
+        let partial = merge_service_discovery(found.clone(), Some(vec![inspected.clone()]));
+        assert_eq!(partial.len(), 2);
+        assert_eq!(
+            partial[0].details.operating_system.as_deref(),
+            Some("Fixture OS")
+        );
+        assert!(partial[1]
+            .details
+            .source
+            .as_deref()
+            .unwrap()
+            .contains("incomplete"));
+        let timeout = merge_service_discovery(found.clone(), None);
+        assert!(timeout.iter().all(|d| d
+            .details
+            .source
+            .as_deref()
+            .unwrap()
+            .contains("incomplete")));
+        inspected.mac = Some("02:00:00:00:00:09".into());
+        let changed = merge_service_discovery(found, Some(vec![inspected]));
+        assert!(changed[0].details.operating_system.is_none());
+        assert!(changed[0]
+            .details
+            .source
+            .as_deref()
+            .unwrap()
+            .contains("MAC changed"));
+    }
     #[test]
     #[cfg(unix)]
     fn cancelling_a_tool_stops_it_promptly() {
@@ -447,6 +630,17 @@ mod tests {
         assert!(result.unwrap_err().to_string().contains("cancelled"));
         assert!(start.elapsed() < Duration::from_secs(2));
         worker.join().unwrap();
+    }
+
+    #[test]
+    fn an_already_cancelled_tool_is_not_started() {
+        let result = bounded_output_cancellable(
+            &mut Command::new("nonexistent-hns-fixture-command"),
+            1024,
+            Duration::from_secs(1),
+            &std::sync::atomic::AtomicBool::new(true),
+        );
+        assert!(result.unwrap_err().to_string().contains("cancelled"));
     }
 
     #[test]

@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { command, native } from '../api';
 
 type Host = {
@@ -11,6 +11,7 @@ type Host = {
   platform: string;
 };
 type Job = {
+  warning?: string | null;
   running: boolean;
   kind: string;
   count: number;
@@ -20,8 +21,12 @@ type Job = {
 };
 export default function HostCollection({
   onLocal,
+  onView = onLocal,
+  parentBusy = false,
 }: {
   onLocal: (sensor: string) => void;
+  onView?: (sensor: string) => void;
+  parentBusy?: boolean;
 }) {
   const [host, setHost] = useState<Host>();
   const [job, setJob] = useState<Job>();
@@ -32,6 +37,8 @@ export default function HostCollection({
   const [notice, setNotice] = useState('');
   const [starting, setStarting] = useState(false);
   const [checking, setChecking] = useState(false);
+  const statusEpoch = useRef(0);
+  const startPending = useRef(false);
   const [services, setServices] = useState(false);
   const [installing, setInstalling] = useState<'discover' | 'capture' | null>(
     null,
@@ -60,25 +67,30 @@ export default function HostCollection({
       .then((result) => {
         if (alive) {
           setHost(result);
-          setCidr(result.suggestedCidrs[0] || '');
+          setCidr((value) => value || result.suggestedCidrs[0] || '');
         }
       })
       .catch((e) => {
         if (alive) setError(String(e));
       });
-    const poll = () =>
-      void command<Job>('collection_status')
-        .then((result) => {
-          if (alive) setJob(result);
-        })
-        .catch((e) => {
-          if (alive) setError(String(e));
-        });
-    poll();
-    const interval = setInterval(poll, 1000);
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const poll = async () => {
+      const epoch = statusEpoch.current;
+      try {
+        if (!startPending.current) {
+          const result = await command<Job>('collection_status');
+          if (alive && epoch === statusEpoch.current) setJob(result);
+        }
+      } catch (e) {
+        if (alive && epoch === statusEpoch.current) setError(String(e));
+      } finally {
+        if (alive) timer = setTimeout(() => void poll(), 1000);
+      }
+    };
+    void poll();
     return () => {
       alive = false;
-      clearInterval(interval);
+      clearTimeout(timer);
     };
   }, []);
   const install = async (kind: 'discover' | 'capture', permission = false) => {
@@ -100,6 +112,7 @@ export default function HostCollection({
     }
   };
   const start = async (kind: 'discover' | 'capture', inspected = host) => {
+    if (parentBusy || startPending.current || job?.running) return;
     if (kind === 'discover' && !inspected?.discoveryAvailable) {
       await install(kind);
       return;
@@ -127,8 +140,11 @@ export default function HostCollection({
       );
       return;
     }
+    startPending.current = true;
+    statusEpoch.current += 1;
     setStarting(true);
     setError('');
+    setNotice('');
     try {
       const sensor = await command<string>('start_collection', {
         kind,
@@ -141,10 +157,13 @@ export default function HostCollection({
     } catch (e) {
       setError(String(e));
     } finally {
+      statusEpoch.current += 1;
+      startPending.current = false;
       setStarting(false);
     }
   };
-  const busy = starting || checking || job?.running || Boolean(installing);
+  const busy =
+    parentBusy || starting || checking || job?.running || Boolean(installing);
   return (
     <section className="panel setup-panel host-collection">
       <div className="panel-heading compact">
@@ -345,6 +364,7 @@ export default function HostCollection({
               ? ' Discovery can take up to five minutes.'
               : ''}
           </p>
+          {job.warning && <p>{job.warning}</p>}
           {job.error && (
             <p role="alert" className="tool-output">
               {job.error}
@@ -395,7 +415,8 @@ export default function HostCollection({
             {job.sensorId && (
               <button
                 className="button secondary"
-                onClick={() => onLocal(job.sensorId!)}
+                disabled={parentBusy}
+                onClick={() => onView(job.sensorId!)}
               >
                 View these observations
               </button>

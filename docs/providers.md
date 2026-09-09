@@ -49,3 +49,5 @@ Physical Windows login, inference, installation prompts, and capture-driver beha
 Provider/model/effort choices are stored locally without credentials. Model availability is checked again when returning to the page; an in-progress request holds the account lease and model loading waits for it. Status requests are serialized, with slower idle polling.
 
 Completed explanations are saved only when the user clicks Save completed explanation. The local database keeps up to 20 exact request/response pairs; duplicate saves do not add duplicates. Users can inspect and delete saved items or export them with local data. Responses render a small Markdown subset as React text, without raw HTML, remote images, or executable links. Client version containment gates remain in force.
+
+Summary preparation allowlists identity timestamp field names and accepts only bounded integer timestamps. Imported or remote metadata keys cannot bypass the identifier-alias boundary by hiding a name or address inside a timestamp-map key. Native review is still required for the complete submitted text.

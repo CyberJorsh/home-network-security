@@ -423,6 +423,25 @@ fn stop_explanation(state: State<'_, Arc<AppState>>) {
 }
 
 #[tauri::command]
+fn alert_rules(state: State<'_, Arc<AppState>>) -> CmdResult<hns_core::AlertRules> {
+    state
+        .local
+        .lock()
+        .map_err(error)?
+        .alert_rules()
+        .map_err(error)
+}
+#[tauri::command]
+fn set_alert_rules(state: State<'_, Arc<AppState>>, rules: hns_core::AlertRules) -> CmdResult<()> {
+    state
+        .local
+        .lock()
+        .map_err(error)?
+        .set_alert_rules(&rules)
+        .map_err(error)
+}
+
+#[tauri::command]
 fn storage_limit(state: State<'_, Arc<AppState>>) -> CmdResult<usize> {
     state
         .local
@@ -578,6 +597,8 @@ fn main() {
             set_storage_limit,
             export_local_data,
             clear_local_data,
+            alert_rules,
+            set_alert_rules,
             explanation_history,
             save_explanation,
             delete_explanation,

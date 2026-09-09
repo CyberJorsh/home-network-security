@@ -12,6 +12,7 @@ use std::{
 #[derive(Clone, Default, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Job {
+    pub warning: Option<String>,
     pub running: bool,
     pub kind: String,
     pub count: usize,
@@ -41,28 +42,29 @@ pub struct Host {
     discovery_available: bool,
     platform: String,
 }
-pub fn inspect() -> Result<Host, String> {
-    let result = bounded_output(
+fn capture_interfaces(cancel: &AtomicBool) -> anyhow::Result<Vec<Interface>> {
+    let bytes = bounded_output_cancellable(
         tool_command("tshark").arg("-D"),
         65536,
         Duration::from_secs(15),
-    );
-    let (interfaces, capture_error) = match result {
-        Ok(bytes) => (
-            String::from_utf8_lossy(&bytes)
-                .lines()
-                .filter_map(|line| {
-                    let (_, label) = line.split_once(". ")?;
-                    // Capture by the concrete interface name, not a reorderable numeric index.
-                    let id = label.split(" (").next()?.to_string();
-                    Some(Interface {
-                        id,
-                        label: label.into(),
-                    })
-                })
-                .collect(),
-            None,
-        ),
+        cancel,
+    )?;
+    Ok(String::from_utf8_lossy(&bytes)
+        .lines()
+        .filter_map(|line| {
+            let (_, label) = line.split_once(". ")?;
+            // Capture by the concrete interface name, not a reorderable numeric index.
+            let id = label.split(" (").next()?.to_string();
+            Some(Interface {
+                id,
+                label: label.into(),
+            })
+        })
+        .collect())
+}
+pub fn inspect() -> Result<Host, String> {
+    let (interfaces, capture_error) = match capture_interfaces(&AtomicBool::new(false)) {
+        Ok(interfaces) => (interfaces, None),
         Err(e) => (
             Vec::new(),
             Some(format!("TShark interface check failed: {e:#}")),
@@ -165,12 +167,15 @@ impl Collection {
         std::thread::spawn(move || {
             let result = (|| -> anyhow::Result<usize> {
                 if kind == "capture" {
-                    let host = inspect().map_err(anyhow::Error::msg)?;
+                    use anyhow::Context;
+                    let interfaces = capture_interfaces(&cancel)
+                        .context("Could not list local capture interfaces")?;
                     anyhow::ensure!(
-                        host.interfaces.iter().any(|i| i.id == target),
+                        interfaces.iter().any(|i| i.id == target),
                         "Choose a currently listed local capture interface"
                     );
                 }
+                anyhow::ensure!(!cancel.load(Ordering::Relaxed), "Collection cancelled");
                 let mut store = Store::open(&db)?;
                 if !store.sensors()?.iter().any(|s| s.id == id) {
                     let mut sensor =
@@ -188,6 +193,16 @@ impl Collection {
                         crate::host_identity::enrich(&mut found, &cancel);
                     }
                     anyhow::ensure!(!cancel.load(Ordering::Relaxed), "Collection cancelled");
+                    if found.iter().any(|d| {
+                        d.details
+                            .source
+                            .as_deref()
+                            .is_some_and(|s| s.contains("service inspection incomplete"))
+                    }) {
+                        if let Ok(mut job) = status.lock() {
+                            job.warning = Some("Some service inspections did not finish. Confirmed discovery responses were kept; missing service details do not mean no services are running.".into());
+                        }
+                    }
                     store.save_discovery(&id, &found)?;
                     Ok(found.len())
                 } else {
@@ -243,6 +258,12 @@ fn capture_remedy(message: &str) -> &'static str {
 #[cfg(test)]
 mod diagnostic_tests {
     use super::*;
+    #[test]
+    fn cancelled_interface_preflight_does_not_run_tools() {
+        let error = capture_interfaces(&AtomicBool::new(true)).err().unwrap();
+        assert!(error.to_string().contains("cancelled"));
+    }
+
     #[test]
     fn routes_capture_failures_to_the_actual_remedy() {
         assert_eq!(
